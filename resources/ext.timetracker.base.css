@@ -1,0 +1,45 @@
+/* Base design tokens + shared card, loaded site-wide so the special pages and
+   the content templates share one look. */
+
+:root {
+	--tt-accent: #14866d;
+	--tt-accent-dark: #0f6b57;
+	--tt-accent-soft: #eaf5f1;
+	--tt-ink: #202122;
+	--tt-muted: #54595d;
+	--tt-border: #dbe0e3;
+	--tt-soft-bg: #f7f9fa;
+	--tt-hover: #eef6f3;
+	--tt-radius: 10px;
+	--tt-radius-sm: 7px;
+	--tt-shadow: 0 1px 2px rgba( 0, 0, 0, 0.05 ), 0 2px 6px rgba( 0, 0, 0, 0.04 );
+}
+
+/* Card / panel shared by the special pages and the entity templates. */
+.tt-card {
+	background: #fff;
+	border: 1px solid var(--tt-border);
+	border-radius: var(--tt-radius);
+	box-shadow: var(--tt-shadow);
+	padding: 1.15em 1.35em;
+	margin: 1em 0;
+}
+
+/* Time-table cell utilities: right-aligned durations, centered pencil-edit. */
+.tt-num {
+	text-align: right;
+	white-space: nowrap;
+	font-variant-numeric: tabular-nums;
+}
+
+.tt-edit {
+	text-align: center;
+	white-space: nowrap;
+}
+
+/* Footnote under a capped time table (the rest live in Special:TimeReports). */
+.tt-table-note {
+	margin: 0.5em 0 0;
+	font-size: 0.85em;
+	color: var(--tt-muted);
+}
