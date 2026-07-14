@@ -10,10 +10,5 @@ class ResourceHooks implements BeforePageDisplayHook {
 	/** @inheritDoc */
 	public function onBeforePageDisplay( $out, $skin ): void {
 		$out->addModuleStyles( [ 'ext.timetracker.base' ] );
-		// A time save redirects here with ?ttfresh; the module reloads the page
-		// once so its SMW-backed tables reflect the just-committed change.
-		if ( $out->getRequest()->getCheck( 'ttfresh' ) ) {
-			$out->addModules( [ 'ext.timetracker.refresh' ] );
-		}
 	}
 }

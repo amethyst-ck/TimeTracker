@@ -60,4 +60,24 @@ class Duration {
 		$totalMinutes = max( 0, (int)round( (float)$trimmed * 60 ) );
 		return [ intdiv( $totalMinutes, 60 ), $totalMinutes % 60 ];
 	}
+
+	/**
+	 * Parse a user-typed grid-cell duration into decimal hours: "2:30" (H:MM) or
+	 * "2.5" (decimal hours). Empty/whitespace -> 0.0 (clears the cell); anything
+	 * unrecognized -> null so the caller can reject it.
+	 */
+	public static function parse( string $input ): ?float {
+		$s = trim( $input );
+		if ( $s === '' ) {
+			return 0.0;
+		}
+		if ( strpos( $s, ':' ) !== false ) {
+			if ( !preg_match( '/^(\d*):([0-5]?\d)?$/', $s, $m ) ) {
+				return null;
+			}
+			$mins = isset( $m[2] ) && $m[2] !== '' ? (int)$m[2] : 0;
+			return (int)$m[1] + $mins / 60.0;
+		}
+		return preg_match( '/^\d*\.?\d+$/', $s ) ? (float)$s : null;
+	}
 }

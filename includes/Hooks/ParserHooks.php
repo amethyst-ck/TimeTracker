@@ -28,7 +28,6 @@ class ParserHooks implements ParserFirstCallInitHook {
 		'newcustomer' => [ 'Special:FormEdit/Customer', '🏢' ],
 		'newjob' => [ 'Special:FormEdit/Job', '📁' ],
 		'newtask' => [ 'Special:FormEdit/Task', '📋' ],
-		'edittime' => [ 'Special:EditTime', '📝' ],
 		'browse' => [ 'Customers', '🏙️' ],
 		'reports' => [ 'Special:TimeReports', '📊' ],
 	];
@@ -40,11 +39,8 @@ class ParserHooks implements ParserFirstCallInitHook {
 	 * or New tiles here. null is a blank cell (supported, unused).
 	 */
 	private const DASHBOARD_LAYOUT = [
-		[ 'edittime', 'reports', 'browse' ],
+		[ 'reports', 'browse' ],
 	];
-
-	/** Max rows an entity page's time table shows; the rest live in the reports. */
-	private const TIMETABLE_LIMIT = 2000;
 
 	public function __construct(
 		private readonly TitleFactory $titleFactory,
@@ -66,8 +62,7 @@ class ParserHooks implements ParserFirstCallInitHook {
 		$parser->setFunctionHook( 'timetracker_customers', $this->renderCustomers( ... ) );
 		$parser->setFunctionHook( 'timetracker_jobs', $this->renderJobs( ... ) );
 		$parser->setFunctionHook( 'timetracker_tasks', $this->renderTasks( ... ) );
-		$parser->setFunctionHook( 'timetracker_timetable', $this->renderTimeTable( ... ) );
-		$parser->setFunctionHook( 'timetracker_total', $this->renderTotal( ... ) );
+		$parser->setFunctionHook( 'timetracker_grid', $this->renderGrid( ... ) );
 		$parser->setFunctionHook( 'timetracker_progress', $this->renderProgress( ... ) );
 	}
 
@@ -84,6 +79,116 @@ class ParserHooks implements ParserFirstCallInitHook {
 		$out->addModuleStyles( [ 'ext.timetracker.timer' ] );
 		$returnTo = Title::castFromPageReference( $parser->getPage() );
 		return $this->html( $this->widget->render( RequestContext::getMain(), $returnTo ) );
+	}
+
+	/**
+	 * {{#timetracker_grid:<scope>|<id>}} — the editable weekly grid embedded on an
+	 * entity or user page, scoped to that entity for the viewing user (a user page
+	 * shows that user's whole week). Cells are read-only for anyone who can't edit
+	 * the shown user's time.
+	 */
+	public function renderGrid( Parser $parser, string $scope = '', string $id = '', string $arg = '' ): array {
+		$out = $parser->getOutput();
+		$out->updateCacheExpiry( 0 );
+		$out->addModules( [ 'ext.timetracker.grid' ] );
+		$ctx = RequestContext::getMain();
+		$viewer = $ctx->getUser();
+		$anchor = trim( $ctx->getRequest()->getVal( 'ttweek', '' ) );
+		$days = $this->timezone->weekDays( $anchor !== '' ? $anchor : null );
+		$from = $days[0]['ymd'];
+		$to = $days[count( $days ) - 1]['ymd'];
+		$id = trim( $id );
+		$arg = trim( $arg );
+		$scope = trim( $scope );
+		[ $customer, $job, $task, $gridUser ] = match ( $scope ) {
+			'customer' => [ $id, '', '', $viewer->getName() ],
+			'job' => [ '', $id, '', $viewer->getName() ],
+			'task' => [ '', '', $id, $viewer->getName() ],
+			'user' => [ '', '', '', $id !== '' ? $id : $viewer->getName() ],
+			default => [ '', '', '', $viewer->getName() ],
+		};
+		$rows = $this->query->entries( $customer, $job, $gridUser, $from, $to, $task );
+		$names = [
+			'customers' => $this->query->customers(),
+			'jobs' => $this->query->jobs(),
+			'tasks' => $this->query->tasks(),
+		];
+		$page = Title::castFromPageReference( $parser->getPage() );
+		return $this->html( ( $page ? $this->weekNav( $page, $days ) : '' ) . $this->table->renderGrid(
+			$rows, $names, $days, $viewer->getName(),
+			$viewer->isAllowed( 'timetracker-editothers' ),
+			$gridUser, $this->gridAddMap( $scope, $id ),
+			$this->gridFixed( $scope, $id, $arg, $names ) ) );
+	}
+
+	/** Prev/next week buttons + a date picker above an embedded grid; navigation
+	 * reloads the page with the chosen week's Monday in ?ttweek. */
+	private function weekNav( Title $page, array $days ): string {
+		$monday = $days[0]['ymd'];
+		$prev = ( new \DateTime( $monday ) )->modify( '-7 days' )->format( 'Y-m-d' );
+		$next = ( new \DateTime( $monday ) )->modify( '+7 days' )->format( 'Y-m-d' );
+		$label = ( new \DateTime( $monday ) )->format( 'M j' ) . ' – ' . ( new \DateTime( $days[6]['ymd'] ) )->format( 'M j' );
+		$btn = static fn ( string $mon, string $text ): string => Html::element( 'a',
+			[ 'href' => $page->getLocalURL( [ 'ttweek' => $mon ] ), 'class' => 'mw-ui-button tt-g-weekbtn' ], $text );
+		return Html::rawElement( 'div', [ 'class' => 'tt-g-weeknav' ],
+			$btn( $prev, '◀' )
+			. Html::element( 'span', [ 'class' => 'tt-g-weeklabel' ], $label )
+			. $btn( $next, '▶' )
+			. Html::element( 'input', [ 'type' => 'date', 'class' => 'tt-g-weekpick', 'value' => $monday ] ) );
+	}
+
+	/**
+	 * The dimensions an embedded grid's page fixes, as dim => [id, name]: a
+	 * customer page fixes the customer, a job page the customer + job, a task
+	 * page all three (its job comes in as $arg). Nothing is fixed on a user page.
+	 *
+	 * @return array<string,array{0:string,1:string}>
+	 */
+	private function gridFixed( string $scope, string $id, string $arg, array $names ): array {
+		$cust = static fn ( string $c ): array => [ $c, $names['customers'][$c] ?? $c ];
+		$job = static fn ( string $j ): array => [ $j, $names['jobs'][$j] ?? $j ];
+		switch ( $scope ) {
+			case 'customer':
+				return [ 'customer' => $cust( $id ) ];
+			case 'job':
+				return [ 'customer' => $cust( $this->query->jobCustomer( $id ) ), 'job' => $job( $id ) ];
+			case 'task':
+				return [
+					'customer' => $cust( $this->query->jobCustomer( $arg ) ),
+					'job' => $job( $arg ),
+					'task' => [ $id, $names['tasks'][$id] ?? $id ],
+				];
+			default:
+				return [];
+		}
+	}
+
+	/**
+	 * The add-row picker map for an embedded grid, scoped to the entity: the whole
+	 * customer→job→task map for a user page, that customer's jobs for a customer
+	 * page, just that job's tasks for a job page, and nothing for a single task.
+	 *
+	 * @return array<string,mixed>
+	 */
+	private function gridAddMap( string $scope, string $id ): array {
+		$map = $this->query->customerJobsMap();
+		switch ( $scope ) {
+			case 'customer':
+				return isset( $map[$id] ) ? [ $id => $map[$id] ] : [];
+			case 'job':
+				$cust = $this->query->jobCustomer( $id );
+				if ( $cust === '' || !isset( $map[$cust] ) ) {
+					return [];
+				}
+				$entry = $map[$cust];
+				$entry['jobs'] = array_values( array_filter( $entry['jobs'] ?? [],
+					static fn ( $j ) => $j['id'] === $id ) );
+				return [ $cust => $entry ];
+			case 'task':
+				return [];
+			default:
+				return $map;
+		}
 	}
 
 	/**
@@ -177,104 +282,6 @@ class ParserHooks implements ParserFirstCallInitHook {
 		$head = '<tr><th>Task</th><th>Status</th><th class="tt-num">Logged</th></tr>';
 		return $this->html( $this->table->scroll(
 			'<table class="tt-table sortable">' . $head . $rows . '</table>' ) );
-	}
-
-	/**
-	 * {{#timetracker_timetable:<type>|<id>}} — the time table filtered by
-	 * customer / job / user (Day, Customer, Job, User, Notes, Time, edit).
-	 */
-	public function renderTimeTable( Parser $parser, string $type = '', string $id = '' ): array {
-		$this->live( $parser );
-		// Fetch one past the display cap so we can tell whether it truncated (the
-		// "Total logged" figure counts every entry, so a capped table would
-		// otherwise silently disagree with it).
-		$entries = $this->query->entriesForFilter( $type, $id, self::TIMETABLE_LIMIT + 1 );
-		if ( !$entries ) {
-			return $this->timetable( $this->table->empty( $this->msg( 'timetracker-none-time' ) ) );
-		}
-		$capped = count( $entries ) > self::TIMETABLE_LIMIT;
-		if ( $capped ) {
-			// entries() is newest-first, so keep the most recent.
-			$entries = array_slice( $entries, 0, self::TIMETABLE_LIMIT );
-		}
-		$customers = $this->query->customers();
-		$jobs = $this->query->jobs();
-		$tasks = $this->query->tasks();
-		// SMW returns entries unordered; sort into a deterministic total order
-		// (customer -> job -> task with General first -> day -> user) so rows
-		// don't shuffle on reload.
-		usort( $entries, static fn ( $a, $b ) => TableRenderer::compareEntries( $a, $b, $customers, $jobs, $tasks ) );
-		// Save on the pencil's EditTime should return to this page.
-		$page = $parser->getPage();
-		$returnTo = $page ? Title::castFromPageReference( $page )->getPrefixedText() : '';
-		// Drop the columns that are constant for this page: a customer page's rows
-		// are all that customer; a job page's all that job (and customer);
-		// a task page's all that task; a user page's all that user.
-		$showCustomer = !in_array( $type, [ 'customer', 'job', 'task' ], true );
-		$showJob = !in_array( $type, [ 'job', 'task' ], true );
-		$showTask = $type !== 'task';
-		$showUser = $type !== 'user';
-		$rows = '';
-		foreach ( $entries as $e ) {
-			$cells = Html::element( 'td', [], $e['day'] );
-			if ( $showCustomer ) {
-				$cells .= Html::rawElement( 'td', [],
-					$this->table->pageLink( $e['customer'], $customers[$e['customer']] ?? $e['customer'] ) );
-			}
-			if ( $showJob ) {
-				$cells .= Html::rawElement( 'td', [],
-					$this->table->pageLink( $e['job'], $jobs[$e['job']] ?? $e['job'] ) );
-			}
-			if ( $showTask ) {
-				$cells .= Html::rawElement( 'td', [],
-					$this->table->pageLink( $e['task'], $tasks[$e['task']] ?? $e['task'] ) );
-			}
-			if ( $showUser ) {
-				$cells .= Html::rawElement( 'td', [], $this->table->userLink( $e['user'] ) );
-			}
-			$cells .= Html::rawElement( 'td', [], $this->table->notes( $e['notes'] ) )
-				. Html::element( 'td', [ 'class' => 'tt-num' ], Duration::hm( (float)$e['duration'] ) )
-				. Html::rawElement( 'td', [ 'class' => 'tt-edit' ],
-					$this->table->editLink( $e['customer'], $e['job'], $e['task'], $e['day'], $e['user'], $returnTo ) );
-			$rows .= Html::rawElement( 'tr', [], $cells );
-		}
-		$head = '<tr><th>Day</th>'
-			. ( $showCustomer ? '<th>Customer</th>' : '' )
-			. ( $showJob ? '<th>Job</th>' : '' )
-			. ( $showTask ? '<th>Task</th>' : '' )
-			. ( $showUser ? '<th>User</th>' : '' )
-			. '<th>Notes</th><th class="tt-num">Time</th><th></th></tr>';
-		$note = $capped ? $this->cappedNote() : '';
-		return $this->timetable( $this->table->scroll(
-			'<table class="tt-table sortable">' . $head . $rows . '</table>' ) . $note );
-	}
-
-	/** A footnote shown when the time table is capped: the visible rows are only
-	 * the most recent, so point at Special:TimeReports for the full history. */
-	private function cappedNote(): string {
-		$reports = $this->titleFactory->newFromText( 'Special:TimeReports' );
-		$label = $this->msg( 'timetracker-link-reports' );
-		$link = $reports
-			? Html::element( 'a', [ 'href' => $reports->getLocalURL() ], $label )
-			: $label;
-		return Html::rawElement( 'div', [ 'class' => 'tt-table-note' ],
-			wfMessage( 'timetracker-timetable-capped' )->inContentLanguage()
-				->numParams( self::TIMETABLE_LIMIT )->rawParams( $link )->escaped() );
-	}
-
-	/**
-	 * Wrap a time table in a stable container so the timer's post-stop JS can
-	 * swap it in place (the inner element differs between the empty and populated
-	 * states, so it can't be targeted directly).
-	 */
-	private function timetable( string $inner ): array {
-		return $this->html( Html::rawElement( 'div', [ 'class' => 'tt-timetable' ], $inner ) );
-	}
-
-	/** {{#timetracker_total:<type>|<id>}} — the formatted total for a filter. */
-	public function renderTotal( Parser $parser, string $type = '', string $id = '' ): string {
-		$this->live( $parser );
-		return Duration::hm( $this->query->total( $type, $id ) );
 	}
 
 	/**

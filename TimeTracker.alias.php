@@ -9,5 +9,4 @@ $specialPageAliases = [];
 $specialPageAliases['en'] = [
 	'TimeTracker' => [ 'TimeTracker' ],
 	'TimeReports' => [ 'TimeReports' ],
-	'EditTime' => [ 'EditTime', 'AddTime' ],
 ];

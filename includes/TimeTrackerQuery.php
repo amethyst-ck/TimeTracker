@@ -377,13 +377,6 @@ class TimeTrackerQuery {
 		return $sum;
 	}
 
-	/** Entries for a single-filter entity page (customer|job|task|user). */
-	public function entriesForFilter( string $filterType, string $filterId, int $limit = 2000 ): array {
-		[ $c, $p, $u, $tk ] = $this->filterTriple( $filterType, $filterId );
-		$rows = $this->entries( $c, $p, $u, '', '', $tk );
-		return array_slice( $rows, 0, $limit );
-	}
-
 	/** Distinct user names that have logged time. @return string[] */
 	public function reportUserNames(): array {
 		$users = [];

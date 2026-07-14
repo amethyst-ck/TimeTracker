@@ -192,40 +192,8 @@
 	padding: 1.5em;
 }
 
-/* Weekly grid — day columns are compact and right-aligned; cells fill the
-   whole column so the whole day is clickable. */
-.tt-grid th.tt-g-day {
-	text-align: right;
-	white-space: nowrap;
-}
-
-.tt-grid td.tt-num {
-	padding: 0;
-}
-
-.tt-grid td.tt-num a.tt-g-cell {
-	display: block;
-	padding: 0.4em 0.7em;
-	text-decoration: none;
-	color: inherit;
-}
-
-.tt-grid td.tt-num a.tt-g-cell:hover {
-	background: var( --tt-hover, rgba( 0, 0, 0, 0.04 ) );
-}
-
-/* Empty editable cell: a faint plus that only asserts itself on hover. */
-.tt-grid a.tt-g-add {
-	color: #b7bcc0;
-}
-
-.tt-grid a.tt-g-add:hover {
-	color: var( --tt-accent, #3366cc );
-}
-
-.tt-grid td.tt-g-rowtot {
-	font-weight: 700;
-}
+/* The editable weekly grid's own styles live in ext.timetracker.grid.css so
+   they load with the grid module on entity pages too. */
 
 @media ( max-width: 720px ) {
 	.tt-f-actions {

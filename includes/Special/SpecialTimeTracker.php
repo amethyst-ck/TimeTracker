@@ -59,9 +59,6 @@ class SpecialTimeTracker extends SpecialPage {
 				$added = $this->timer->stop( $this->getAuthority() );
 				if ( $added !== null ) {
 					$query['saved'] = (string)$added;
-					// Reload the destination once so its SMW tables reflect the
-					// entry data SMW commits just after this redirect is sent.
-					$query['ttfresh'] = '1';
 				}
 			}
 			$out->redirect( $this->returnDestination( trim( $request->getVal( 'returnto', '' ) ) )->getLocalURL( $query ) );

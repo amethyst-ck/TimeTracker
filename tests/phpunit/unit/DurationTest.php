@@ -32,4 +32,36 @@ class DurationTest extends MediaWikiUnitTestCase {
 			'negative is zero' => [ -3, '0m' ],
 		];
 	}
+
+	/**
+	 * @dataProvider provideParse
+	 */
+	public function testParse( string $input, ?float $expected ) {
+		$got = Duration::parse( $input );
+		if ( $expected === null ) {
+			$this->assertNull( $got );
+		} else {
+			$this->assertEqualsWithDelta( $expected, $got, 1e-9 );
+		}
+	}
+
+	public static function provideParse(): array {
+		return [
+			'h:mm' => [ '2:30', 2.5 ],
+			'decimal' => [ '2.5', 2.5 ],
+			'whole' => [ '2', 2.0 ],
+			'minutes only' => [ ':30', 0.5 ],
+			'hours colon' => [ '2:', 2.0 ],
+			'leading dot' => [ '.5', 0.5 ],
+			'empty clears' => [ '', 0.0 ],
+			'whitespace clears' => [ '   ', 0.0 ],
+			'odd minutes' => [ '1:07', 1.0 + 7 / 60 ],
+			'letters invalid' => [ 'abc', null ],
+			'minutes over 59 invalid' => [ '2:75', null ],
+			'negative invalid' => [ '-1', null ],
+			'double dot invalid' => [ '2.5.1', null ],
+			'exponent invalid' => [ '1e3', null ],
+			'suffix invalid' => [ '2h', null ],
+		];
+	}
 }

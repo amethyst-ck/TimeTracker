@@ -19,12 +19,12 @@ class TableRenderer {
 
 	/**
 	 * Total ordering for entry/row arrays so table rows are deterministic (SMW
-	 * returns them unordered): by customer name, then job name, then task name
-	 * with the General bucket (empty task) first, then day (most recent first,
-	 * when present), then user — with the page ids as final tie-breakers so rows
-	 * never shuffle even when two entities share a name. $customers/$jobs/$tasks
-	 * map page id -> display name. Each row needs customer/job/task keys and, for
-	 * per-day tables, day/user.
+	 * returns them unordered): by day (most recent first), then customer name,
+	 * job name, task name with the General bucket (empty task) first, then user —
+	 * with the page ids as final tie-breakers so rows never shuffle even when two
+	 * entities share a name. Day-less tables (day '') fall straight through to the
+	 * name keys. $customers/$jobs/$tasks map page id -> display name. Each row
+	 * needs customer/job/task keys and, for per-day tables, day/user.
 	 *
 	 * @param array<string,?string> $a
 	 * @param array<string,?string> $b
@@ -42,14 +42,184 @@ class TableRenderer {
 		} else {
 			$taskCmp = strcasecmp( $name( $tasks, $ta ), $name( $tasks, $tb ) );
 		}
-		return strcasecmp( $name( $customers, (string)$a['customer'] ), $name( $customers, (string)$b['customer'] ) )
+		// Date first (most recent first), then customer -> job -> task (General
+		// first) -> user, with the page ids as final tie-breakers so the order is
+		// total (rows never shuffle when two entities share a name).
+		return strcmp( (string)( $b['day'] ?? '' ), (string)( $a['day'] ?? '' ) )
+			?: strcasecmp( $name( $customers, (string)$a['customer'] ), $name( $customers, (string)$b['customer'] ) )
 			?: strcasecmp( $name( $jobs, (string)$a['job'] ), $name( $jobs, (string)$b['job'] ) )
 			?: $taskCmp
-			?: strcmp( (string)( $b['day'] ?? '' ), (string)( $a['day'] ?? '' ) )
 			?: strcmp( (string)( $a['user'] ?? '' ), (string)( $b['user'] ?? '' ) )
 			?: strcmp( (string)$a['customer'], (string)$b['customer'] )
 			?: strcmp( (string)$a['job'], (string)$b['job'] )
 			?: strcmp( $ta, $tb );
+	}
+
+	/**
+	 * The editable weekly grid: rows = customer/job/task (+ user when the grid
+	 * spans users), columns = the week's days, cells = H:MM inputs that auto-save
+	 * via the timetrackersetcell API (see ext.timetracker.grid). Shared by
+	 * Special:TimeReports and the {{#timetracker_grid}} parser function.
+	 *
+	 * @param array<int,array<string,?string>> $rows entry rows
+	 * @param array{customers:array<string,string>,jobs:array<string,string>,tasks:array<string,string>} $names
+	 * @param array<int,array{ymd:string,label:string}> $days the week's days
+	 * @param string $viewer acting user name
+	 * @param bool $isAdmin whether the viewer may edit others' time
+	 * @param ?string $gridUser the single user the grid is for (null = all users)
+	 * @param array<string,mixed> $addMap customer→job→task map for the add-row picker ([] = none)
+	 */
+	public function renderGrid(
+		array $rows, array $names, array $days, string $viewer, bool $isAdmin,
+		?string $gridUser, array $addMap, array $fixed = []
+	): string {
+		$allUsers = $gridUser === null;
+		$nameCols = $allUsers ? 4 : 3;
+		$canEdit = static fn ( string $u ): bool => $u === $viewer || $isAdmin;
+
+		$cells = [];
+		$meta = [];
+		foreach ( $rows as $r ) {
+			$m = [ 'customer' => (string)$r['customer'], 'job' => (string)$r['job'],
+				'task' => (string)$r['task'], 'user' => (string)$r['user'] ];
+			$key = implode( '|', $m );
+			$meta[$key] ??= $m;
+			$cells[$key][(string)$r['day']] = ( $cells[$key][(string)$r['day']] ?? 0.0 ) + (float)$r['duration'];
+		}
+		uasort( $meta, fn ( $a, $b ) => self::compareEntries( $a, $b, $names['customers'], $names['jobs'], $names['tasks'] ) );
+
+		$head = $this->gridTh( 'timereports-col-customer' ) . $this->gridTh( 'timereports-col-job' )
+			. $this->gridTh( 'timereports-col-task' )
+			. ( $allUsers ? $this->gridTh( 'timereports-col-user' ) : '' );
+		foreach ( $days as $d ) {
+			$head .= Html::element( 'th', [ 'class' => 'tt-num tt-g-day' ], $d['label'] );
+		}
+		$head .= $this->gridTh( 'timereports-total', 'tt-num' );
+
+		$colTotals = array_fill_keys( array_column( $days, 'ymd' ), 0.0 );
+		$grand = 0.0;
+		$body = '';
+		foreach ( $meta as $key => $m ) {
+			$editable = $canEdit( $m['user'] );
+			$rowTotal = 0.0;
+			$dayCells = '';
+			foreach ( $days as $d ) {
+				$val = $cells[$key][$d['ymd']] ?? 0.0;
+				$rowTotal += $val;
+				$colTotals[$d['ymd']] += $val;
+				$dayCells .= $this->gridCell( $val, $m, $d['ymd'], $editable );
+			}
+			$grand += $rowTotal;
+			$body .= Html::rawElement( 'tr', [], $this->gridNameCells( $m, $names, $allUsers ) . $dayCells
+				. Html::element( 'td', [ 'class' => 'tt-num tt-g-rowtot' ], Duration::hm( $rowTotal ) ) );
+		}
+		if ( $body === '' ) {
+			$body = Html::rawElement( 'tr', [ 'class' => 'tt-g-none' ],
+				Html::rawElement( 'td', [ 'colspan' => $nameCols + count( $days ) + 1, 'class' => 'tt-empty' ],
+					wfMessage( 'timereports-none' )->text() ) );
+		}
+
+		$footDays = '';
+		foreach ( $days as $d ) {
+			$footDays .= Html::element( 'th', [ 'class' => 'tt-num tt-g-daytot', 'data-day' => $d['ymd'] ],
+				Duration::hm( $colTotals[$d['ymd']] ) );
+		}
+		$foot = Html::rawElement( 'tr', [ 'class' => 'tt-ts-total' ],
+			Html::rawElement( 'th', [ 'colspan' => $nameCols ], wfMessage( 'timereports-total' )->text() )
+			. $footDays . Html::element( 'th', [ 'class' => 'tt-num tt-g-grand' ], Duration::hm( $grand ) ) );
+
+		$table = Html::rawElement( 'div', [ 'class' => 'tt-ts-wrap' ],
+			Html::rawElement( 'table', [ 'class' => 'wikitable tt-timesheet tt-grid' ],
+				Html::rawElement( 'thead', [], Html::rawElement( 'tr', [], $head ) )
+				. Html::rawElement( 'tbody', [], $body )
+				. Html::rawElement( 'tfoot', [], $foot ) ) );
+
+		$canAdd = !$allUsers && $canEdit( (string)$gridUser ) && ( $addMap || $fixed );
+		$wrap = [ 'class' => 'tt-grid-wrap' ];
+		$add = '';
+		if ( $canAdd ) {
+			$wrap['data-tt-jobs'] = json_encode( $this->gridJobsJson( $addMap ) );
+			$wrap['data-tt-days'] = json_encode( array_column( $days, 'ymd' ) );
+			$wrap['data-tt-user'] = (string)$gridUser;
+			$add = $this->gridAddRow( $addMap, $fixed );
+		}
+		return Html::rawElement( 'div', $wrap, $table . $add );
+	}
+
+	private function gridTh( string $msg, string $class = '' ): string {
+		return Html::element( 'th', $class ? [ 'class' => $class ] : [], wfMessage( $msg )->text() );
+	}
+
+	private function gridCell( float $val, array $m, string $ymd, bool $editable ): string {
+		$td = [ 'class' => 'tt-num tt-g-cell', 'data-day' => $ymd, 'data-h' => Duration::trim( $val ) ];
+		if ( !$editable ) {
+			return Html::element( 'td', $td, $val > 0 ? Duration::hm( $val ) : '' );
+		}
+		[ $h, $mm ] = Duration::hoursMinutes( $val );
+		return Html::rawElement( 'td', $td, Html::element( 'input', [
+			'type' => 'text', 'class' => 'tt-g-in', 'autocomplete' => 'off', 'inputmode' => 'text',
+			'value' => $val > 0 ? sprintf( '%d:%02d', $h, $mm ) : '',
+			'data-c' => $m['customer'], 'data-j' => $m['job'], 'data-k' => $m['task'], 'data-u' => $m['user'],
+		] ) );
+	}
+
+	private function gridNameCells( array $m, array $names, bool $allUsers ): string {
+		return Html::rawElement( 'td', [], $this->pageLink( $m['customer'], $names['customers'][$m['customer']] ?? $m['customer'] ) )
+			. Html::rawElement( 'td', [], $this->pageLink( $m['job'], $names['jobs'][$m['job']] ?? $m['job'] ) )
+			. Html::rawElement( 'td', [], $this->pageLink( $m['task'], $names['tasks'][$m['task']] ?? $m['task'] ) )
+			. ( $allUsers ? Html::rawElement( 'td', [], $this->pageLink( 'User:' . $m['user'], $m['user'] ) ) : '' );
+	}
+
+	/**
+	 * The add-row picker. Dimensions the page fixes (a customer page fixes the
+	 * customer, a job page the customer + job, a task page all three) get no
+	 * dropdown — their ids/names ride on data-fix-* for the JS; the rest are
+	 * selects the JS fills/cascades. A task page shows just the Add button.
+	 *
+	 * @param array<string,mixed> $map customer→job→task picker data
+	 * @param array<string,array{0:string,1:string}> $fixed dim => [id, name] for fixed dims
+	 */
+	private function gridAddRow( array $map, array $fixed ): string {
+		$selects = '';
+		if ( !isset( $fixed['customer'] ) ) {
+			$custOpts = '';
+			foreach ( $map as $id => $info ) {
+				$custOpts .= Html::element( 'option', [ 'value' => (string)$id ], $info['name'] ?? (string)$id );
+			}
+			$selects .= Html::rawElement( 'select', [ 'class' => 'tt-customer' ], $custOpts ) . ' ';
+		}
+		if ( !isset( $fixed['job'] ) ) {
+			$selects .= Html::rawElement( 'select', [ 'class' => 'tt-job' ], '' ) . ' ';
+		}
+		if ( !isset( $fixed['task'] ) ) {
+			$selects .= Html::rawElement( 'select', [ 'class' => 'tt-task' ], '' ) . ' ';
+		}
+		$attrs = [ 'class' => 'tt-g-addrow' ];
+		foreach ( [ 'customer' => 'c', 'job' => 'j', 'task' => 'k' ] as $dim => $short ) {
+			if ( isset( $fixed[$dim] ) ) {
+				$attrs["data-fix-$short"] = $fixed[$dim][0];
+				$attrs["data-fix-{$short}name"] = $fixed[$dim][1];
+			}
+		}
+		return Html::rawElement( 'div', $attrs,
+			Html::element( 'span', [ 'class' => 'tt-g-addlabel' ], wfMessage( 'timetracker-grid-addrow' )->text() )
+			. ' ' . $selects
+			. Html::element( 'button', [ 'type' => 'button', 'class' => 'tt-g-add-go mw-ui-button mw-ui-progressive' ],
+				wfMessage( 'timetracker-grid-add' )->text() ) );
+	}
+
+	/** customer→job→task map for the JS cascade: { custId: [ [jobId, name, [[taskId, name]…]]…] }. */
+	private function gridJobsJson( array $map ): array {
+		$out = [];
+		foreach ( $map as $custId => $info ) {
+			$jobs = [];
+			foreach ( $info['jobs'] ?? [] as $job ) {
+				$jobs[] = [ $job['id'], $job['name'],
+					array_map( static fn ( $t ) => [ $t['id'], $t['name'] ], $job['tasks'] ?? [] ) ];
+			}
+			$out[(string)$custId] = $jobs;
+		}
+		return $out;
 	}
 
 	/** A link to a page by id, labeled $label; '—' if blank. */
@@ -68,34 +238,6 @@ class TableRenderer {
 		return $user !== '' ? $this->pageLink( 'User:' . $user, $user ) : '—';
 	}
 
-	/**
-	 * A pencil linking to Special:EditTime pre-filled for one entry; $returnTo (a
-	 * page title) is where Save returns to — the page this table is on.
-	 */
-	public function editLink( string $customer, string $job, string $task, string $day, string $user, string $returnTo = '' ): string {
-		$title = $this->titleFactory->newFromText( 'Special:EditTime' );
-		$url = $title ? $title->getLocalURL( self::editQuery( $customer, $job, $task, $day, $user, $returnTo ) ) : '#';
-		return Html::element( 'a',
-			[ 'href' => $url, 'title' => wfMessage( 'timereports-edit-entry' )->inContentLanguage()->text() ], '✏️' );
-	}
-
-	/** The Special:EditTime query params pre-filling one entry (shared by the
-	 * entity-page pencils and the reports pencils, which differ only in returnto). */
-	public static function editQuery( string $customer, string $job, string $task, string $day, string $user,
-		string $returnto = '', string $returntoquery = ''
-	): array {
-		$q = [ 'customer' => $customer, 'job' => $job, 'day' => $day, 'user' => $user ];
-		if ( $task !== '' ) {
-			$q['task'] = $task;
-		}
-		if ( $returnto !== '' ) {
-			$q['returnto'] = $returnto;
-		}
-		if ( $returntoquery !== '' ) {
-			$q['returntoquery'] = $returntoquery;
-		}
-		return $q;
-	}
 
 	/** Render a stored note: decode the storage markers, keep line breaks, escape HTML. */
 	public function notes( string $stored ): string {

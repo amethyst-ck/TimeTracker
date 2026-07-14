@@ -1,6 +1,6 @@
 {
 	"name": "TimeTracker",
-	"version": "1.0.0",
+	"version": "1.1.0",
 	"author": [ "Cindy Cicalese" ],
 	"url": "https://github.com/amethyst-ck/TimeTracker",
 	"descriptionmsg": "timetracker-desc",
@@ -44,17 +44,17 @@
 				"TimeTracker:Query",
 				"TitleFactory",
 				"TimeTracker:Timezone",
-				"TimeTracker:EntryWikitext"
+				"TimeTracker:EntryWikitext",
+				"TimeTracker:TableRenderer"
 			]
-		},
-		"EditTime": {
-			"class": "MediaWiki\\Extension\\TimeTracker\\Special\\SpecialEditTime",
+		}
+	},
+	"APIModules": {
+		"timetrackersetcell": {
+			"class": "MediaWiki\\Extension\\TimeTracker\\Api\\ApiSetCell",
 			"services": [
 				"TimeTracker:EntryStore",
-				"TimeTracker:Query",
-				"TitleFactory",
-				"TimeTracker:Timezone",
-				"TimeTracker:Timer"
+				"TimeTracker:Query"
 			]
 		}
 	},
@@ -133,8 +133,17 @@
 				"jquery"
 			]
 		},
-		"ext.timetracker.refresh": {
-			"scripts": [ "ext.timetracker.refresh.js" ]
+		"ext.timetracker.grid": {
+			"scripts": [ "ext.timetracker.grid.js" ],
+			"styles": [ "ext.timetracker.grid.css" ],
+			"messages": [
+				"timetracker-task-general"
+			],
+			"dependencies": [
+				"jquery",
+				"mediawiki.api",
+				"mediawiki.notification"
+			]
 		}
 	},
 	"ResourceFileModulePaths": {

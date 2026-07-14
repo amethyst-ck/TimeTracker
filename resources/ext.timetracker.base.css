@@ -36,10 +36,3 @@
 	text-align: center;
 	white-space: nowrap;
 }
-
-/* Footnote under a capped time table (the rest live in Special:TimeReports). */
-.tt-table-note {
-	margin: 0.5em 0 0;
-	font-size: 0.85em;
-	color: var(--tt-muted);
-}

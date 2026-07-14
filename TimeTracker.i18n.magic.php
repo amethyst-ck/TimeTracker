@@ -19,7 +19,6 @@ $magicWords['en'] = [
 	'timetracker_customers' => [ 0, 'timetracker_customers' ],
 	'timetracker_jobs' => [ 0, 'timetracker_jobs' ],
 	'timetracker_tasks' => [ 0, 'timetracker_tasks' ],
-	'timetracker_timetable' => [ 0, 'timetracker_timetable' ],
-	'timetracker_total' => [ 0, 'timetracker_total' ],
+	'timetracker_grid' => [ 0, 'timetracker_grid' ],
 	'timetracker_progress' => [ 0, 'timetracker_progress' ],
 ];

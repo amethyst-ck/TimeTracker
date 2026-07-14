@@ -29,7 +29,8 @@ class SpecialTimeReports extends SpecialPage {
 		private readonly TimeTrackerQuery $query,
 		private readonly TitleFactory $titleFactory,
 		private readonly Timezone $timezone,
-		private readonly EntryWikitext $wikitext
+		private readonly EntryWikitext $wikitext,
+		private readonly TableRenderer $table
 	) {
 		parent::__construct( 'TimeReports' );
 	}
@@ -59,7 +60,11 @@ class SpecialTimeReports extends SpecialPage {
 			$userValue = $userParam;
 		}
 
-		$view = $req->getVal( 'view', 'list' ) === 'grid' ? 'grid' : 'list';
+		// The weekly grid is the primary, editable view; list is a read-only report.
+		$view = $req->getVal( 'view', 'grid' ) === 'list' ? 'list' : 'grid';
+		if ( $view === 'grid' ) {
+			$out->addModules( 'ext.timetracker.grid' );
+		}
 		$range = $req->getVal( 'range', 'week' );
 		// The grid is inherently a Mon–Sun matrix, so it forces the week range.
 		if ( $view === 'grid' || !in_array( $range, self::RANGES, true ) ) {
@@ -97,12 +102,10 @@ class SpecialTimeReports extends SpecialPage {
 			return;
 		}
 
-		// A row pencil's EditTime should return to this report, filters + view intact.
-		$returntoquery = wfArrayToCgi( $this->filterParams( $customer, $job, $userValue, $range, $period, $task, $view ) );
 		$out->addHTML( $this->renderFilterBar( $customer, $job, $userValue, $range, $period, $jobs, $task, $view ) );
 		$out->addHTML( $view === 'grid'
-			? $this->renderGrid( $rows, $names, $period, $userFilter === null, $returntoquery )
-			: $this->renderTimesheet( $rows, $names, $returntoquery ) );
+			? $this->renderGrid( $rows, $names, $period, $userFilter )
+			: $this->renderTimesheet( $rows, $names ) );
 	}
 
 	/**
@@ -376,9 +379,14 @@ class SpecialTimeReports extends SpecialPage {
 		$next = Html::element( 'button',
 			[ 'type' => 'submit', 'name' => 'nav', 'value' => 'next', 'class' => 'mw-ui-button tt-week-nav' ], '▶' );
 		$label = Html::element( 'span', [ 'class' => 'tt-week-label' ], $period['label'] );
+		// A date picker to jump to any week (handled by ext.timetracker.grid's JS,
+		// loaded on the grid view). It reloads with weekstart set to the chosen day.
+		$pick = Html::element( 'input', [ 'type' => 'date', 'class' => 'tt-g-weekpick tt-week-nav',
+			'value' => $period['from'], 'data-param' => 'weekstart',
+			'title' => $this->msg( 'timereports-pick-week' )->text() ] );
 		return Html::rawElement( 'form',
 			[ 'method' => 'get', 'action' => $this->getPageTitle()->getLocalURL(), 'class' => 'tt-week-pager' ],
-			$hidden . $prev . $label . $next );
+			$hidden . $prev . $label . $next . $pick );
 	}
 
 	/** Distinct users who have logged time, plus the viewer, sorted. @return string[] */
@@ -418,18 +426,17 @@ class SpecialTimeReports extends SpecialPage {
 	 * @param array{customers:array<string,string>,jobs:array<string,string>} $names
 	 * @param string $returntoquery current filter query, so a row pencil returns here
 	 */
-	private function renderTimesheet( array $rows, array $names, string $returntoquery ): string {
+	private function renderTimesheet( array $rows, array $names ): string {
 		$head = Html::rawElement( 'tr', [],
 			$this->th( 'timereports-col-customer' ) . $this->th( 'timereports-col-job' )
 			. $this->th( 'timereports-col-task' )
 			. $this->th( 'timereports-col-user' )
 			. $this->th( 'timereports-col-notes' )
-			. $this->th( 'timereports-col-duration', 'tt-num' )
-			. Html::element( 'th', [ 'class' => 'tt-edit' ], '' ) );
+			. $this->th( 'timereports-col-duration', 'tt-num' ) );
 
 		if ( !$rows ) {
 			$body = Html::rawElement( 'tr', [],
-				Html::rawElement( 'td', [ 'colspan' => 7, 'class' => 'tt-empty' ],
+				Html::rawElement( 'td', [ 'colspan' => 6, 'class' => 'tt-empty' ],
 					$this->msg( 'timereports-none' )->text() ) );
 			return $this->tableShell( $head, $body, '' );
 		}
@@ -451,17 +458,15 @@ class SpecialTimeReports extends SpecialPage {
 			$grand += $dayTotal;
 			$body .= Html::rawElement( 'tr', [ 'class' => 'tt-ts-day' ],
 				Html::rawElement( 'th', [ 'colspan' => 5 ], $this->dayLabel( $day ) )
-				. Html::rawElement( 'th', [ 'class' => 'tt-num' ], Duration::hm( $dayTotal ) )
-				. Html::element( 'th', [ 'class' => 'tt-edit' ], '' ) );
+				. Html::rawElement( 'th', [ 'class' => 'tt-num' ], Duration::hm( $dayTotal ) ) );
 			foreach ( $dayRows as $r ) {
-				$body .= $this->entryRow( $r, $names, $returntoquery );
+				$body .= $this->entryRow( $r, $names );
 			}
 		}
 
 		$foot = Html::rawElement( 'tr', [ 'class' => 'tt-ts-total' ],
 			Html::rawElement( 'th', [ 'colspan' => 5 ], $this->msg( 'timereports-total' )->text() )
-			. Html::rawElement( 'th', [ 'class' => 'tt-num' ], Duration::hm( $grand ) )
-			. Html::element( 'th', [ 'class' => 'tt-edit' ], '' ) );
+			. Html::rawElement( 'th', [ 'class' => 'tt-num' ], Duration::hm( $grand ) ) );
 
 		return $this->tableShell( $head, $body, $foot );
 	}
@@ -471,93 +476,21 @@ class SpecialTimeReports extends SpecialPage {
 	/**
 	 * Weekly timesheet matrix: one row per customer/job/task (plus user when
 	 * viewing everyone), a column per weekday, cells = hours logged that day.
-	 * Each editable cell links to Special:EditTime for that day/task.
+	 * Each cell is inline-editable and auto-saves via the setcell API.
 	 *
 	 * @param array<int,array<string,?string>> $rows
 	 * @param array{customers:array<string,string>,jobs:array<string,string>,tasks:array<string,string>} $names
 	 * @param array{from:string,to:string,label:string,weekstart:?string} $period from = the week's Monday
 	 * @param bool $allUsers whether the user filter spans everyone (adds a User column + row key)
 	 */
-	private function renderGrid( array $rows, array $names, array $period, bool $allUsers, string $returntoquery ): string {
-		$days = $this->weekDays( $period['from'] );
-		$nameCols = $allUsers ? 4 : 3;
-
-		// Pivot entries into cells[rowKey][day] = summed hours, keeping row meta.
-		$cells = [];
-		$meta = [];
-		foreach ( $rows as $r ) {
-			$m = [ 'customer' => (string)$r['customer'], 'job' => (string)$r['job'],
-				'task' => (string)$r['task'], 'user' => (string)$r['user'] ];
-			$key = implode( '|', $m );
-			$meta[$key] ??= $m;
-			$cells[$key][(string)$r['day']] = ( $cells[$key][(string)$r['day']] ?? 0.0 ) + (float)$r['duration'];
-		}
-		uasort( $meta, static fn ( $a, $b ) => TableRenderer::compareEntries( $a, $b, $names['customers'], $names['jobs'], $names['tasks'] ) );
-
-		$th = $this->th( 'timereports-col-customer' ) . $this->th( 'timereports-col-job' )
-			. $this->th( 'timereports-col-task' )
-			. ( $allUsers ? $this->th( 'timereports-col-user' ) : '' );
-		foreach ( $days as $d ) {
-			$th .= Html::element( 'th', [ 'class' => 'tt-num tt-g-day' ], $d['label'] );
-		}
-		$th .= $this->th( 'timereports-total', 'tt-num' );
-		$head = Html::rawElement( 'tr', [], $th );
-
-		if ( !$meta ) {
-			$body = Html::rawElement( 'tr', [],
-				Html::rawElement( 'td', [ 'colspan' => $nameCols + count( $days ) + 1, 'class' => 'tt-empty' ],
-					$this->msg( 'timereports-none' )->text() ) );
-			return $this->tableShell( $head, $body, '', 'tt-grid' );
-		}
-
-		$colTotals = array_fill_keys( array_column( $days, 'ymd' ), 0.0 );
-		$grand = 0.0;
-		$body = '';
-		foreach ( $meta as $key => $m ) {
-			$editable = $this->canEdit( $m['user'] );
-			$rowTotal = 0.0;
-			$dayCells = '';
-			foreach ( $days as $d ) {
-				$val = $cells[$key][$d['ymd']] ?? 0.0;
-				$rowTotal += $val;
-				$colTotals[$d['ymd']] += $val;
-				$dayCells .= $this->gridCell( $val, $m, $d['ymd'], $editable, $returntoquery );
-			}
-			$grand += $rowTotal;
-			$nameCells = Html::rawElement( 'td', [],
-					$this->pageLink( $m['customer'], $names['customers'][$m['customer']] ?? $m['customer'] ) )
-				. Html::rawElement( 'td', [],
-					$this->pageLink( $m['job'], $names['jobs'][$m['job']] ?? $m['job'] ) )
-				. Html::rawElement( 'td', [],
-					$this->pageLink( $m['task'], $names['tasks'][$m['task']] ?? $m['task'] ) )
-				. ( $allUsers ? Html::rawElement( 'td', [], $this->pageLink( 'User:' . $m['user'], $m['user'] ) ) : '' );
-			$body .= Html::rawElement( 'tr', [],
-				$nameCells . $dayCells
-				. Html::element( 'td', [ 'class' => 'tt-num tt-g-rowtot' ], Duration::hm( $rowTotal ) ) );
-		}
-
-		$footDays = '';
-		foreach ( $days as $d ) {
-			$footDays .= Html::element( 'th', [ 'class' => 'tt-num' ], Duration::hm( $colTotals[$d['ymd']] ) );
-		}
-		$foot = Html::rawElement( 'tr', [ 'class' => 'tt-ts-total' ],
-			Html::rawElement( 'th', [ 'colspan' => $nameCols ], $this->msg( 'timereports-total' )->text() )
-			. $footDays
-			. Html::element( 'th', [ 'class' => 'tt-num' ], Duration::hm( $grand ) ) );
-
-		return $this->tableShell( $head, $body, $foot, 'tt-grid' );
-	}
-
-	/** One grid cell: hours as an EditTime link when editable, a '＋' when empty, else blank text. */
-	private function gridCell( float $val, array $m, string $ymd, bool $editable, string $returntoquery ): string {
-		if ( $editable ) {
-			$url = $this->editUrl( $m['customer'], $m['job'], $m['task'], $ymd, $m['user'], $returntoquery );
-			$inner = Html::element( 'a', [ 'href' => $url, 'class' => $val > 0 ? 'tt-g-cell' : 'tt-g-cell tt-g-add' ],
-				$val > 0 ? Duration::hm( $val ) : '＋' );
-		} else {
-			$inner = $val > 0 ? Duration::hm( $val ) : '';
-		}
-		return Html::rawElement( 'td', [ 'class' => 'tt-num' ], $inner );
+	private function renderGrid( array $rows, array $names, array $period, ?string $gridUser ): string {
+		$canAdd = $gridUser !== null && $this->canEdit( (string)$gridUser );
+		return $this->table->renderGrid(
+			$rows, $names, $this->weekDays( $period['from'] ),
+			$this->getUser()->getName(),
+			$this->getUser()->isAllowed( 'timetracker-editothers' ),
+			$gridUser,
+			$canAdd ? $this->query->customerJobsMap() : [] );
 	}
 
 	/** The seven Mon..Sun days of the week starting at $mondayYmd. @return array<int,array{ymd:string,label:string}> */
@@ -580,18 +513,13 @@ class SpecialTimeReports extends SpecialPage {
 	 * @param array<string,?string> $r
 	 * @param array{customers:array<string,string>,jobs:array<string,string>} $names
 	 */
-	private function entryRow( array $r, array $names, string $returntoquery ): string {
+	private function entryRow( array $r, array $names ): string {
 		// customer/job are stable page ids; resolve to names (fall back to
 		// the id if the parent page is gone).
 		$custId = (string)$r['customer'];
 		$projId = (string)$r['job'];
 		$taskId = (string)$r['task'];
 		$user = (string)$r['user'];
-		// Only offer the pencil for rows the viewer may actually edit (their own,
-		// or anyone's for a time-tracker admin); otherwise EditTime would silently
-		// retarget the save to the viewer.
-		$edit = $this->canEdit( $user )
-			? $this->editLink( $custId, $projId, $taskId, (string)$r['day'], $user, $returntoquery ) : '';
 		return Html::rawElement( 'tr', [],
 			Html::rawElement( 'td', [], $this->pageLink( $custId, $names['customers'][$custId] ?? $custId ) )
 			. Html::rawElement( 'td', [], $this->pageLink( $projId, $names['jobs'][$projId] ?? $projId ) )
@@ -599,8 +527,7 @@ class SpecialTimeReports extends SpecialPage {
 			. Html::rawElement( 'td', [], $this->pageLink( 'User:' . $user, $user ) )
 			. Html::rawElement( 'td', [ 'class' => 'tt-ts-notes' ],
 				nl2br( htmlspecialchars( $this->wikitext->unfoldNewlines( (string)$r['notes'] ) ) ) )
-			. Html::element( 'td', [ 'class' => 'tt-num' ], Duration::hm( (float)$r['duration'] ) )
-			. Html::rawElement( 'td', [ 'class' => 'tt-edit' ], $edit ) );
+			. Html::element( 'td', [ 'class' => 'tt-num' ], Duration::hm( (float)$r['duration'] ) ) );
 	}
 
 	/** Whether the viewer may edit $rowUser's time (their own, or an admin). */
@@ -609,21 +536,6 @@ class SpecialTimeReports extends SpecialPage {
 			|| $this->getUser()->isAllowed( 'timetracker-editothers' );
 	}
 
-	/** A pencil linking to Special:EditTime pre-filled for one entry; Save returns
-	 * to this report with its filters. */
-	private function editLink( string $customer, string $job, string $task, string $day, string $user, string $returntoquery ): string {
-		return Html::element( 'a',
-			[ 'href' => $this->editUrl( $customer, $job, $task, $day, $user, $returntoquery ),
-				'title' => $this->msg( 'timereports-edit-entry' )->text() ], '✏️' );
-	}
-
-	/** URL to Special:EditTime pre-filled for one entry, returning to this report. */
-	private function editUrl( string $customer, string $job, string $task, string $day, string $user, string $returntoquery ): string {
-		$title = $this->titleFactory->newFromText( 'Special:EditTime' );
-		$q = TableRenderer::editQuery( $customer, $job, $task, $day, $user,
-			$this->getPageTitle()->getPrefixedText(), $returntoquery );
-		return $title ? $title->getLocalURL( $q ) : '#';
-	}
 
 	private function dayLabel( string $day ): string {
 		try {

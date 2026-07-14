@@ -1,5 +1,5 @@
-/* Special:TimeTracker + Special:EditTime form layout (base card + tokens
-   come from ext.timetracker.base). */
+/* Special:TimeTracker form layout (base card + tokens come from
+   ext.timetracker.base). */
 
 .tt-card {
 	max-width: 34em;
@@ -97,28 +97,9 @@
 	min-width: 0;
 }
 
-.tt-duration-inputs {
-	display: inline-flex;
-	align-items: center;
-	gap: 0.35em;
-}
-
-.tt-num-input {
-	width: 4.5em;
-}
-
 .tt-actions,
 .tt-stop-form {
 	margin-top: 1.1em;
-}
-
-/* Match the PageForms cancel: a subtle grey hover keeping the red label
-   (mediawiki.ui's quiet-destructive hover otherwise fills solid red-on-red). */
-.mw-ui-button.mw-ui-quiet.mw-ui-destructive.tt-cancel:hover,
-.mw-ui-button.mw-ui-quiet.mw-ui-destructive.tt-cancel:focus {
-	background-color: #f8f9fa;
-	border-color: transparent;
-	color: #d33;
 }
 
 @media ( max-width: 720px ) {
