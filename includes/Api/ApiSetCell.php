@@ -17,6 +17,9 @@ use Wikimedia\ParamValidator\ParamValidator;
  */
 class ApiSetCell extends ApiBase {
 
+	/** A single day's entry can't exceed the hours in a day. */
+	private const MAX_HOURS = 24;
+
 	public function __construct(
 		$mainModule,
 		$moduleName,
@@ -52,6 +55,10 @@ class ApiSetCell extends ApiBase {
 			$this->dieWithError( 'timetracker-api-badvalue', 'badvalue' );
 		}
 		$hours = max( 0.0, $hours );
+		if ( $hours > self::MAX_HOURS ) {
+			$this->dieWithError(
+				[ 'timetracker-api-maxhours', self::MAX_HOURS ], 'maxhours' );
+		}
 
 		$target = $this->resolveTargetUser( trim( (string)$params['user'] ) );
 		// Keep any existing note — the grid sets only the duration.

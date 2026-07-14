@@ -75,6 +75,7 @@
 	"timetracker-api-badbucket": "The customer, job, or task for this time entry is invalid.",
 	"timetracker-api-badday": "The day for this time entry is not a valid date.",
 	"timetracker-api-badvalue": "Enter a time like 2:30 or 2.5.",
+	"timetracker-api-maxhours": "A day's entry can be at most $1 hours.",
 	"timetracker-grid-addrow": "Add a row:",
 	"timetracker-grid-add": "Add",
 	"timereports-pick-week": "Jump to the week of this date",

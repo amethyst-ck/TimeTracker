@@ -75,6 +75,7 @@
 	"timetracker-api-badbucket": "API error (action=timetrackersetcell) when the customer/job/task combination is invalid.",
 	"timetracker-api-badday": "API error (action=timetrackersetcell) when the day parameter is not a YYYY-MM-DD date.",
 	"timetracker-api-badvalue": "API error (action=timetrackersetcell) when the typed duration cannot be parsed as H:MM or decimal hours.",
+	"timetracker-api-maxhours": "API error (action=timetrackersetcell) when the entered time exceeds the per-day maximum. $1 is the maximum number of hours (24).",
 	"timetracker-grid-addrow": "Label before the add-a-row customer/job/task picker below the weekly grid.",
 	"timetracker-grid-add": "Label of the button that adds the chosen customer/job/task as a new grid row.",
 	"timereports-pick-week": "Tooltip on the date picker in the reports week pager that jumps to the week containing the chosen date.",
