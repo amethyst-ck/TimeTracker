@@ -201,10 +201,11 @@
 	}
 
 	// Grey out (and disable) the add-row once every combo it could add is shown.
+	// Returns the combos still addable (so callers can advance the selects).
 	function updateAddState( $wrap ) {
 		var $row = $wrap.find( '.tt-g-addrow' );
 		if ( !$row.length ) {
-			return;
+			return [];
 		}
 		var shown = {};
 		$wrap.find( 'input.tt-g-in' ).each( function () {
@@ -217,6 +218,7 @@
 		var done = remaining.length === 0;
 		$row.toggleClass( 'tt-g-addrow-done', done );
 		$row.find( '.tt-g-add-go, select' ).prop( 'disabled', done );
+		return remaining;
 	}
 
 	function initAddRow( $wrap ) {
@@ -261,6 +263,22 @@
 				$k.append( $( '<option>' ).val( t[ 0 ] ).text( t[ 1 ] ) );
 			} );
 		}
+		// Point the (unfixed) selects at a specific customer/job/task combo,
+		// rebuilding the cascaded option lists so the values exist.
+		function pointAt( combo ) {
+			if ( $c.length ) {
+				$c.val( combo[ 0 ] );
+				fillJobs();
+			}
+			if ( $j.length ) {
+				$j.val( combo[ 1 ] );
+				fillTasks();
+			}
+			if ( $k.length ) {
+				$k.val( combo[ 2 ] || '' );
+			}
+		}
+
 		if ( $c.length ) {
 			$c.on( 'change', fillJobs );
 		}
@@ -281,7 +299,12 @@
 				fixK !== undefined ? fixK : $k.val(),
 				fixK !== undefined ? fixKN :
 					( $k.val() ? $k.find( 'option:selected' ).text() : mw.msg( 'timetracker-task-general' ) ) );
-			updateAddState( $wrap );
+			// Advance the selects to the next still-addable combo so a repeat
+			// click adds something new; the row greys once none remain.
+			var remaining = updateAddState( $wrap );
+			if ( remaining.length ) {
+				pointAt( remaining[ 0 ] );
+			}
 		} );
 	}
 
