@@ -523,7 +523,7 @@ class SpecialTimeReports extends SpecialPage {
 		return Html::rawElement( 'tr', [],
 			Html::rawElement( 'td', [], $this->pageLink( $custId, $names['customers'][$custId] ?? $custId ) )
 			. Html::rawElement( 'td', [], $this->pageLink( $projId, $names['jobs'][$projId] ?? $projId ) )
-			. Html::rawElement( 'td', [], $this->pageLink( $taskId, $names['tasks'][$taskId] ?? $taskId ) )
+			. Html::rawElement( 'td', [], $this->table->taskLabel( $taskId, $names['tasks'][$taskId] ?? $taskId ) )
 			. Html::rawElement( 'td', [], $this->pageLink( 'User:' . $user, $user ) )
 			. Html::rawElement( 'td', [ 'class' => 'tt-ts-notes' ],
 				nl2br( htmlspecialchars( $this->wikitext->unfoldNewlines( (string)$r['notes'] ) ) ) )

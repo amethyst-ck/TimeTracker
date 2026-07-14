@@ -166,7 +166,7 @@ class TableRenderer {
 	private function gridNameCells( array $m, array $names, bool $allUsers ): string {
 		return Html::rawElement( 'td', [], $this->pageLink( $m['customer'], $names['customers'][$m['customer']] ?? $m['customer'] ) )
 			. Html::rawElement( 'td', [], $this->pageLink( $m['job'], $names['jobs'][$m['job']] ?? $m['job'] ) )
-			. Html::rawElement( 'td', [], $this->pageLink( $m['task'], $names['tasks'][$m['task']] ?? $m['task'] ) )
+			. Html::rawElement( 'td', [], $this->taskLabel( $m['task'], $names['tasks'][$m['task']] ?? $m['task'] ) )
 			. ( $allUsers ? Html::rawElement( 'td', [], $this->pageLink( 'User:' . $m['user'], $m['user'] ) ) : '' );
 	}
 
@@ -220,6 +220,14 @@ class TableRenderer {
 			$out[(string)$custId] = $jobs;
 		}
 		return $out;
+	}
+
+	/** Task cell content: a link to the task, or the "(General)" label for the
+	 * job's default (task-less) bucket. */
+	public function taskLabel( string $taskId, string $name ): string {
+		return $taskId === ''
+			? htmlspecialchars( wfMessage( 'timetracker-task-general' )->text() )
+			: $this->pageLink( $taskId, $name );
 	}
 
 	/** A link to a page by id, labeled $label; '—' if blank. */
