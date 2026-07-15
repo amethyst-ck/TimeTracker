@@ -28,6 +28,9 @@ class SpecialTimeReports extends SpecialPage {
 	/** Selectable reporting periods. */
 	private const RANGES = [ 'week', 'this_month', 'last_month', 'this_year', 'last_year', 'custom' ];
 
+	/** Optional time grouping of the results ('none' = one flat total set). */
+	private const GROUPS = [ 'none', 'day', 'week', 'month', 'year' ];
+
 	public function __construct(
 		private readonly TimeTrackerQuery $query,
 		private readonly TitleFactory $titleFactory,
@@ -69,6 +72,11 @@ class SpecialTimeReports extends SpecialPage {
 		}
 		$period = $this->resolvePeriod( $range, $req );
 
+		$group = $req->getVal( 'group', 'none' );
+		if ( !in_array( $group, self::GROUPS, true ) ) {
+			$group = 'none';
+		}
+
 		// The job filter is scoped to the chosen customer: with no customer
 		// the dropdown offers only "All jobs". Archived jobs are hidden
 		// from the dropdown, but an explicitly-filtered one is kept so the filter
@@ -99,8 +107,10 @@ class SpecialTimeReports extends SpecialPage {
 			return;
 		}
 
-		$out->addHTML( $this->renderFilterBar( $customer, $job, $userValue, $range, $period, $jobs, $task ) );
-		$out->addHTML( $this->renderSummary( $rows, $names, $userFilter === null ) );
+		$out->addHTML( $this->renderFilterBar( $customer, $job, $userValue, $range, $group, $period, $jobs, $task ) );
+		$out->addHTML( $group === 'none'
+			? $this->renderSummary( $rows, $names, $userFilter === null )
+			: $this->renderGrouped( $rows, $names, $userFilter === null, $group ) );
 	}
 
 	/**
@@ -225,7 +235,8 @@ class SpecialTimeReports extends SpecialPage {
 	/* --------------------------------------------------------------- filter */
 
 	private function renderFilterBar(
-		string $customer, string $job, string $userValue, string $range, array $period, array $jobs, string $task = ''
+		string $customer, string $job, string $userValue, string $range, string $group,
+		array $period, array $jobs, string $task = ''
 	): string {
 		$form = [];
 		$form[] = $this->select( 'customer', $this->options(
@@ -273,6 +284,17 @@ class SpecialTimeReports extends SpecialPage {
 				[ 'type' => 'date', 'name' => 'to', 'class' => 'tt-f-to', 'value' => $period['to'] ] ) );
 		}
 
+		// Group-by selector (auto-submits): break the totals into day/week/month/
+		// year sections, or 'none' for one flat total set.
+		$groupOpts = '';
+		foreach ( self::GROUPS as $g ) {
+			$groupOpts .= Html::element( 'option',
+				[ 'value' => $g ] + ( $g === $group ? [ 'selected' => '' ] : [] ),
+				$this->msg( 'timereports-group-' . $g )->text() );
+		}
+		$form[] = $this->field( 'timereports-filter-group',
+			Html::rawElement( 'select', [ 'name' => 'group', 'class' => 'tt-f-group' ], $groupOpts ) );
+
 		// Preserve the resolved week so a filter change keeps the current week.
 		$hidden = $range === 'week' && $period['weekstart'] !== null
 			? Html::hidden( 'weekstart', $period['weekstart'] ) : '';
@@ -285,7 +307,7 @@ class SpecialTimeReports extends SpecialPage {
 
 		// Section 2 — the week pager (week range only) or the period label, and
 		// CSV export.
-		$baseParams = $this->filterParams( $customer, $job, $userValue, $range, $period, $task );
+		$baseParams = $this->filterParams( $customer, $job, $userValue, $range, $group, $period, $task );
 		$csv = Html::element( 'a',
 			[ 'href' => $this->getPageTitle()->getLocalURL( [ 'format' => 'csv' ] + $baseParams ),
 				'class' => 'mw-ui-button' ],
@@ -301,9 +323,13 @@ class SpecialTimeReports extends SpecialPage {
 
 	/** The current filter + period as query params — shared by the CSV link and the pager. */
 	private function filterParams(
-		string $customer, string $job, string $userValue, string $range, array $period, string $task = ''
+		string $customer, string $job, string $userValue, string $range, string $group,
+		array $period, string $task = ''
 	): array {
 		$params = [ 'user' => $userValue, 'range' => $range ];
+		if ( $group !== 'none' ) {
+			$params['group'] = $group;
+		}
 		if ( $customer !== '' ) {
 			$params['customer'] = $customer;
 		}
@@ -385,6 +411,95 @@ class SpecialTimeReports extends SpecialPage {
 	 * @param bool $allUsers add a User column and key rows by user too
 	 */
 	private function renderSummary( array $rows, array $names, bool $allUsers ): string {
+		$buckets = $this->bucketize( $rows, $allUsers );
+		if ( !$buckets ) {
+			return $this->table->empty( $this->msg( 'timereports-none' )->text() );
+		}
+		$this->sortBuckets( $buckets, $names, $allUsers );
+		$body = '';
+		$grand = 0.0;
+		foreach ( $buckets as $b ) {
+			$grand += $b['hours'];
+			$body .= $this->bucketRow( $b, $names, $allUsers );
+		}
+		return $this->summaryTable( $this->summaryHead( $allUsers ), $body,
+			$this->grandFoot( $grand, $allUsers ) );
+	}
+
+	/**
+	 * As {@see renderSummary} but split into a section per day/week/month/year the
+	 * entries fall in (chronological), each a group sub-header row with the group
+	 * label and subtotal followed by its bucket rows, then a grand total.
+	 *
+	 * @param array<int,array<string,?string>> $rows
+	 * @param array{customers:array<string,string>,jobs:array<string,string>,tasks:array<string,string>} $names
+	 * @param bool $allUsers add a User column and key rows by user too
+	 * @param string $group 'day'|'week'|'month'|'year'
+	 */
+	private function renderGrouped( array $rows, array $names, bool $allUsers, string $group ): string {
+		$tz = $this->timezone->safeZone();
+		$groups = [];
+		foreach ( $rows as $r ) {
+			[ $key, $label, $sort ] = $this->timeGroup( (string)$r['day'], $group, $tz );
+			$groups[$key] ??= [ 'label' => $label, 'sort' => $sort, 'rows' => [] ];
+			$groups[$key]['rows'][] = $r;
+		}
+		if ( !$groups ) {
+			return $this->table->empty( $this->msg( 'timereports-none' )->text() );
+		}
+		uasort( $groups, static fn ( $a, $b ) => strcmp( $a['sort'], $b['sort'] ) );
+
+		$nameCols = $allUsers ? 4 : 3;
+		$body = '';
+		$grand = 0.0;
+		foreach ( $groups as $g ) {
+			$buckets = $this->bucketize( $g['rows'], $allUsers );
+			$this->sortBuckets( $buckets, $names, $allUsers );
+			$sub = array_sum( array_map( static fn ( $b ) => $b['hours'], $buckets ) );
+			$grand += $sub;
+			$body .= Html::rawElement( 'tr', [ 'class' => 'tt-group-row' ],
+				Html::element( 'th', [ 'colspan' => $nameCols, 'scope' => 'colgroup' ], $g['label'] )
+				. Html::element( 'th', [ 'class' => 'tt-num' ], Duration::hm( $sub ) ) );
+			foreach ( $buckets as $b ) {
+				$body .= $this->bucketRow( $b, $names, $allUsers );
+			}
+		}
+		return $this->summaryTable( $this->summaryHead( $allUsers ), $body,
+			$this->grandFoot( $grand, $allUsers ), 'tt-grouped' );
+	}
+
+	/**
+	 * The time-group an entry day falls in, as [key, label, sortkey]. Keys/sortkeys
+	 * are chosen so a lexical sort is chronological.
+	 *
+	 * @return array{0:string,1:string,2:string}
+	 */
+	private function timeGroup( string $day, string $group, DateTimeZone $tz ): array {
+		try {
+			$d = ( new DateTime( $day, $tz ) )->setTime( 0, 0, 0 );
+		} catch ( \Exception $e ) {
+			return [ $day, $day, $day ];
+		}
+		switch ( $group ) {
+			case 'day':
+				return [ $day, $d->format( 'D, M j, Y' ), $day ];
+			case 'week':
+				$mon = ( clone $d )->modify( 'monday this week' );
+				return [ $mon->format( 'Y-m-d' ), 'Week of ' . $mon->format( 'M j, Y' ), $mon->format( 'Y-m-d' ) ];
+			case 'month':
+				return [ $d->format( 'Y-m' ), $d->format( 'F Y' ), $d->format( 'Y-m' ) ];
+			case 'year':
+				return [ $d->format( 'Y' ), $d->format( 'Y' ), $d->format( 'Y' ) ];
+			default:
+				return [ $day, $day, $day ];
+		}
+	}
+
+	/**
+	 * Sum entry rows into customer/job/task (and user, when viewing everyone)
+	 * buckets. @return array<string,array{customer:string,job:string,task:string,user:string,hours:float}>
+	 */
+	private function bucketize( array $rows, bool $allUsers ): array {
 		$buckets = [];
 		foreach ( $rows as $r ) {
 			$c = (string)$r['customer'];
@@ -395,10 +510,11 @@ class SpecialTimeReports extends SpecialPage {
 			$buckets[$key] ??= [ 'customer' => $c, 'job' => $j, 'task' => $t, 'user' => $u, 'hours' => 0.0 ];
 			$buckets[$key]['hours'] += (float)$r['duration'];
 		}
-		if ( !$buckets ) {
-			return $this->table->empty( $this->msg( 'timereports-none' )->text() );
-		}
+		return $buckets;
+	}
 
+	/** Order buckets by resolved customer, then job, then task, then user name. */
+	private function sortBuckets( array &$buckets, array $names, bool $allUsers ): void {
 		$cn = static fn ( array $b ): string => $names['customers'][$b['customer']] ?? $b['customer'];
 		$jn = static fn ( array $b ): string => $names['jobs'][$b['job']] ?? $b['job'];
 		$tn = static fn ( array $b ): string => $b['task'] === '' ? '' : ( $names['tasks'][$b['task']] ?? $b['task'] );
@@ -406,39 +522,47 @@ class SpecialTimeReports extends SpecialPage {
 			?: strnatcasecmp( $jn( $a ), $jn( $b ) )
 			?: strnatcasecmp( $tn( $a ), $tn( $b ) )
 			?: ( $allUsers ? strnatcasecmp( $a['user'], $b['user'] ) : 0 ) );
+	}
 
+	/** One bucket's row: customer/job/task (and user) name cells + its hours. */
+	private function bucketRow( array $b, array $names, bool $allUsers ): string {
+		$cells = Html::rawElement( 'td', [ 'data-label' => $this->msg( 'timereports-col-customer' )->text() ],
+				$this->table->pageLink( $b['customer'], $names['customers'][$b['customer']] ?? $b['customer'] ) )
+			. Html::rawElement( 'td', [ 'data-label' => $this->msg( 'timereports-col-job' )->text() ],
+				$this->table->pageLink( $b['job'], $names['jobs'][$b['job']] ?? $b['job'] ) )
+			. Html::rawElement( 'td', [ 'data-label' => $this->msg( 'timereports-col-task' )->text() ],
+				$this->table->taskLabel( $b['task'],
+					$b['task'] === '' ? '' : ( $names['tasks'][$b['task']] ?? $b['task'] ) ) );
+		if ( $allUsers ) {
+			$cells .= Html::rawElement( 'td', [ 'data-label' => $this->msg( 'timereports-col-user' )->text() ],
+				$this->table->pageLink( 'User:' . $b['user'], $b['user'] ) );
+		}
+		$cells .= Html::element( 'td',
+			[ 'class' => 'tt-num', 'data-label' => $this->msg( 'timereports-col-hours' )->text() ],
+			Duration::hm( $b['hours'] ) );
+		return Html::rawElement( 'tr', [], $cells );
+	}
+
+	/** The Customer/Job/Task[/User]/Hours header cells. */
+	private function summaryHead( bool $allUsers ): string {
 		$th = fn ( string $key, string $class = '' ): string => Html::element(
 			'th', $class !== '' ? [ 'class' => $class ] : [], $this->msg( $key )->text() );
-		$head = $th( 'timereports-col-customer' ) . $th( 'timereports-col-job' ) . $th( 'timereports-col-task' )
+		return $th( 'timereports-col-customer' ) . $th( 'timereports-col-job' ) . $th( 'timereports-col-task' )
 			. ( $allUsers ? $th( 'timereports-col-user' ) : '' ) . $th( 'timereports-col-hours', 'tt-num' );
+	}
 
-		$body = '';
-		$grand = 0.0;
-		foreach ( $buckets as $b ) {
-			$grand += $b['hours'];
-			$cells = Html::rawElement( 'td', [ 'data-label' => $this->msg( 'timereports-col-customer' )->text() ],
-					$this->table->pageLink( $b['customer'], $cn( $b ) ) )
-				. Html::rawElement( 'td', [ 'data-label' => $this->msg( 'timereports-col-job' )->text() ],
-					$this->table->pageLink( $b['job'], $jn( $b ) ) )
-				. Html::rawElement( 'td', [ 'data-label' => $this->msg( 'timereports-col-task' )->text() ],
-					$this->table->taskLabel( $b['task'], $tn( $b ) ) );
-			if ( $allUsers ) {
-				$cells .= Html::rawElement( 'td', [ 'data-label' => $this->msg( 'timereports-col-user' )->text() ],
-					$this->table->pageLink( 'User:' . $b['user'], $b['user'] ) );
-			}
-			$cells .= Html::element( 'td',
-				[ 'class' => 'tt-num', 'data-label' => $this->msg( 'timereports-col-hours' )->text() ],
-				Duration::hm( $b['hours'] ) );
-			$body .= Html::rawElement( 'tr', [], $cells );
-		}
-
-		$foot = Html::rawElement( 'tr', [ 'class' => 'tt-ts-total' ],
+	/** The grand-total footer row. */
+	private function grandFoot( float $grand, bool $allUsers ): string {
+		return Html::rawElement( 'tr', [ 'class' => 'tt-ts-total' ],
 			Html::element( 'th', [ 'colspan' => $allUsers ? 4 : 3 ], $this->msg( 'timereports-total' )->text() )
 			. Html::element( 'th', [ 'class' => 'tt-num' ], Duration::hm( $grand ) ) );
+	}
 
-		// Reuse the timesheet's styled look (.tt-ts-wrap / .tt-timesheet).
+	/** Wrap head/body/foot in the timesheet's styled table (.tt-ts-wrap / .tt-timesheet). */
+	private function summaryTable( string $head, string $body, string $foot, string $extraClass = '' ): string {
+		$cls = 'tt-timesheet tt-summary' . ( $extraClass !== '' ? ' ' . $extraClass : '' );
 		return Html::rawElement( 'div', [ 'class' => 'tt-ts-wrap' ],
-			Html::rawElement( 'table', [ 'class' => 'tt-timesheet tt-summary' ],
+			Html::rawElement( 'table', [ 'class' => $cls ],
 				Html::rawElement( 'thead', [], Html::rawElement( 'tr', [], $head ) )
 				. Html::rawElement( 'tbody', [], $body )
 				. Html::rawElement( 'tfoot', [], $foot ) ) );

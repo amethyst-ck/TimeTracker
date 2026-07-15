@@ -117,6 +117,21 @@
 	font-size: 1.05em;
 }
 
+/* Group-by section header: the time-group label + its subtotal, above the
+   group's bucket rows. */
+.tt-timesheet tr.tt-group-row th {
+	background: var(--tt-soft-bg, #f7f9fa);
+	border-top: 2px solid var(--tt-border, #dbe0e3);
+	text-align: left;
+	font-size: 1em;
+	color: var(--tt-text, #202122);
+}
+
+.tt-timesheet tr.tt-group-row th.tt-num {
+	text-align: right;
+	color: var(--tt-muted, #54595d);
+}
+
 .tt-num {
 	text-align: right;
 	white-space: nowrap;

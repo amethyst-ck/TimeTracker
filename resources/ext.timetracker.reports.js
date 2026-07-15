@@ -19,7 +19,7 @@
 			$form.find( '.tt-f-task' ).val( '' );
 			$form.trigger( 'submit' );
 		} );
-		$form.find( '.tt-f-task, .tt-f-user, .tt-f-from, .tt-f-to' ).on( 'change', function () {
+		$form.find( '.tt-f-task, .tt-f-user, .tt-f-from, .tt-f-to, .tt-f-group' ).on( 'change', function () {
 			$form.trigger( 'submit' );
 		} );
 		// Switching period starts fresh in that range — drop any week anchor so
