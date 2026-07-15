@@ -1,0 +1,237 @@
+/* Styling for the editable weekly grid. Bundled with the grid JS module so it
+   loads wherever the grid renders — Special:TimeReports and the embedded
+   {{#timetracker_grid}} on entity/user pages (whose parser output does not pull
+   in the reports styles). The timesheet base rules are duplicated from
+   ext.timetracker.reports.css so the embedded grid is fully styled on its own. */
+
+.tt-ts-wrap {
+	overflow-x: auto;
+	border: 1px solid var( --tt-border, #dbe0e3 );
+	border-radius: var( --tt-radius, 10px );
+	box-shadow: var( --tt-shadow, 0 1px 2px rgba( 0, 0, 0, 0.05 ) );
+}
+
+.tt-timesheet {
+	border-collapse: collapse;
+	margin: 0;
+	background: #fff;
+	font-size: 0.95em;
+}
+
+.tt-timesheet th,
+.tt-timesheet td {
+	padding: 0.5em 0.85em;
+	border-bottom: 1px solid var( --tt-border, #dbe0e3 );
+}
+
+.tt-timesheet thead th {
+	background: var( --tt-soft-bg, #f7f9fa );
+	text-align: left;
+	white-space: nowrap;
+	font-family: sans-serif;
+	font-size: 0.9em;
+	color: var( --tt-muted, #54595d );
+}
+
+.tt-timesheet tbody tr:hover td {
+	background: var( --tt-hover, #eef6f3 );
+}
+
+.tt-timesheet tr.tt-ts-total th {
+	background: var( --tt-accent-soft, #eaf5f1 );
+	border-top: 2px solid var( --tt-accent, #14866d );
+	color: var( --tt-accent-dark, #0f6b57 );
+	font-size: 1.05em;
+}
+
+.tt-num {
+	text-align: right;
+	white-space: nowrap;
+	font-variant-numeric: tabular-nums;
+}
+
+.tt-empty {
+	text-align: center;
+	color: #72777d;
+	padding: 1.5em;
+}
+
+/* The editable grid sizes to its content (compact) rather than stretching to
+   the full page width; table.tt-grid outranks the .tt-timesheet base rule. */
+table.tt-grid {
+	width: max-content;
+	max-width: 100%;
+}
+
+.tt-grid th.tt-g-day {
+	text-align: right;
+	white-space: nowrap;
+}
+
+.tt-grid td.tt-g-cell {
+	padding: 1px;
+}
+
+/* Editable cell input: borderless until hovered/focused so the grid stays calm. */
+.tt-grid td.tt-g-cell input.tt-g-in {
+	width: 4.5em;
+	box-sizing: border-box;
+	padding: 0.35em 0.5em;
+	text-align: right;
+	font: inherit;
+	color: inherit;
+	border: 1px solid transparent;
+	border-radius: 2px;
+	background: transparent;
+}
+
+.tt-grid td.tt-g-cell input.tt-g-in:hover {
+	border-color: var( --tt-border, #c8ccd1 );
+}
+
+.tt-grid td.tt-g-cell input.tt-g-in:focus {
+	border-color: var( --tt-accent, #3366cc );
+	background: var( --tt-input-bg, #fff );
+	outline: none;
+}
+
+.tt-grid td.tt-g-cell input.tt-g-in.tt-g-err {
+	border-color: #d33;
+	background: rgba( 221, 51, 51, 0.08 );
+}
+
+.tt-grid td.tt-g-rowtot {
+	font-weight: 700;
+}
+
+/* Add-row control below the grid. */
+.tt-g-addrow {
+	margin-top: 0.6em;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.4em;
+	align-items: center;
+}
+
+/* Cap the pickers so long customer/job/task names don't stretch the row
+   (a user page shows all three selects). */
+.tt-g-addrow select {
+	max-width: 11em;
+}
+
+/* Nothing left to add: dimmed and disabled. */
+.tt-g-addrow-done {
+	opacity: 0.45;
+}
+
+/* Week navigation above a grid — a soft-grey bar matching the reports controls. */
+.tt-g-weeknav {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5em;
+	align-items: center;
+	margin: 0 0 0.75em;
+	padding: 0.6em 1em;
+	border: 1px solid var( --tt-border, #dbe0e3 );
+	border-radius: var( --tt-radius, 10px );
+	background: var( --tt-soft-bg, #f7f9fa );
+	box-shadow: var( --tt-shadow, 0 1px 2px rgba( 0, 0, 0, 0.05 ) );
+}
+
+.tt-g-weeknav .tt-g-weeklabel {
+	font-weight: 700;
+	min-width: 9em;
+	text-align: center;
+}
+
+/* Match the surrounding UI font and the reports' date-input look. */
+.tt-g-weekpick {
+	font: inherit;
+	padding: 0.3em 0.5em;
+	border: 1px solid var( --tt-border, #c8ccd1 );
+	border-radius: var( --tt-radius-sm, 7px );
+	background: #fff;
+}
+
+/* Mobile: stack the grid — each row becomes a card of label/value lines
+   (labels come from each cell's data-label) instead of a wide scrolling table. */
+@media ( max-width: 600px ) {
+	.tt-ts-wrap {
+		overflow-x: visible;
+	}
+
+	table.tt-grid {
+		width: 100%;
+	}
+
+	.tt-grid thead {
+		display: none;
+	}
+
+	.tt-grid,
+	.tt-grid tbody,
+	.tt-grid tfoot,
+	.tt-grid tr,
+	.tt-grid td,
+	.tt-grid th {
+		display: block;
+	}
+
+	.tt-grid tbody tr {
+		padding: 0.35em 0;
+		border-bottom: 2px solid var( --tt-border, #dbe0e3 );
+	}
+
+	.tt-grid tbody tr:last-child {
+		border-bottom: none;
+	}
+
+	/* Each cell is a tinted label column (left, uppercase, with a dividing
+	   border) and its value pushed to the right. */
+	.tt-grid tbody td,
+	.tt-grid tfoot .tt-g-grand {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: 0 0.9em 0 0;
+		border: none;
+		text-align: right;
+	}
+
+	.tt-grid tbody td::before,
+	.tt-grid tfoot .tt-g-grand::before {
+		content: attr( data-label );
+		flex: 0 0 42%;
+		align-self: stretch;
+		display: flex;
+		align-items: center;
+		box-sizing: border-box;
+		padding: 0.5em 0.9em;
+		border-right: 1px solid var( --tt-border, #dbe0e3 );
+		background: var( --tt-soft-bg, #f7f9fa );
+		font-family: sans-serif;
+		font-size: 0.78em;
+		font-weight: 600;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		color: var( --tt-muted, #54595d );
+		text-align: left;
+	}
+
+	/* Override the desktop 1px cell padding so day cells match the name cells. */
+	.tt-grid td.tt-g-cell {
+		padding: 0 0.9em 0 0;
+	}
+
+	.tt-grid td.tt-g-cell input.tt-g-in {
+		width: 5em;
+		text-align: right;
+	}
+
+	/* Footer: keep only the week grand total (a labeled line); the per-column
+	   day totals are meaningless once the rows are stacked. */
+	.tt-grid tfoot .tt-g-foot-label,
+	.tt-grid tfoot .tt-g-daytot {
+		display: none;
+	}
+}

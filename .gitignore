@@ -1,0 +1,13 @@
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local-only / never commit
+*.tmp
+*.bak

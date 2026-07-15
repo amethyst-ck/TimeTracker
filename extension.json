@@ -1,0 +1,196 @@
+{
+	"name": "TimeTracker",
+	"version": "1.0.0",
+	"author": [
+		"Cindy Cicalese"
+	],
+	"url": "https://github.com/amethyst-ck/TimeTracker",
+	"descriptionmsg": "timetracker-desc",
+	"license-name": "GPL-2.0-or-later",
+	"type": "specialpage",
+	"requires": {
+		"MediaWiki": ">= 1.43.0",
+		"extensions": {
+			"PageForms": "*",
+			"SemanticMediaWiki": "*"
+		}
+	},
+	"AutoloadNamespaces": {
+		"MediaWiki\\Extension\\TimeTracker\\": "includes/"
+	},
+	"ServiceWiringFiles": [
+		"includes/ServiceWiring.php"
+	],
+	"MessagesDirs": {
+		"TimeTracker": [
+			"i18n"
+		]
+	},
+	"ExtensionMessagesFiles": {
+		"TimeTrackerAlias": "TimeTracker.alias.php",
+		"TimeTrackerMagic": "TimeTracker.i18n.magic.php"
+	},
+	"SpecialPages": {
+		"TimeTracker": {
+			"class": "MediaWiki\\Extension\\TimeTracker\\Special\\SpecialTimeTracker",
+			"services": [
+				"TimeTracker:Timer",
+				"TimeTracker:Query",
+				"TitleFactory",
+				"TimeTracker:TimerWidget"
+			]
+		},
+		"TimeReports": {
+			"class": "MediaWiki\\Extension\\TimeTracker\\Special\\SpecialTimeReports",
+			"services": [
+				"TimeTracker:Query",
+				"TitleFactory",
+				"TimeTracker:Timezone",
+				"TimeTracker:EntryWikitext",
+				"TimeTracker:TableRenderer"
+			]
+		}
+	},
+	"APIModules": {
+		"timetrackersetcell": {
+			"class": "MediaWiki\\Extension\\TimeTracker\\Api\\ApiSetCell",
+			"services": [
+				"TimeTracker:EntryStore",
+				"TimeTracker:Query"
+			]
+		},
+		"timetrackerstop": {
+			"class": "MediaWiki\\Extension\\TimeTracker\\Api\\ApiStop",
+			"services": [
+				"TimeTracker:Timer",
+				"TimeTracker:TimerWidget",
+				"TimeTracker:Query",
+				"TitleFactory"
+			]
+		}
+	},
+	"AvailableRights": [
+		"timetracker-editothers"
+	],
+	"Hooks": {
+		"ParserFirstCallInit": "parser",
+		"PageSaveComplete": "purge",
+		"PageDeleteComplete": "purge",
+		"getUserPermissionsErrors": "permissions",
+		"getUserPermissionsErrorsExpensive": "delete",
+		"BeforePageDisplay": "resources",
+		"SidebarBeforeOutput": "sidebar",
+		"EditFilterMergedContent": "save"
+	},
+	"HookHandlers": {
+		"parser": {
+			"class": "MediaWiki\\Extension\\TimeTracker\\Hooks\\ParserHooks",
+			"services": [
+				"TitleFactory",
+				"TimeTracker:Timezone",
+				"TimeTracker:Query",
+				"TimeTracker:TableRenderer",
+				"TimeTracker:TimerWidget"
+			]
+		},
+		"resources": {
+			"class": "MediaWiki\\Extension\\TimeTracker\\Hooks\\ResourceHooks"
+		},
+		"purge": {
+			"class": "MediaWiki\\Extension\\TimeTracker\\Hooks\\PurgeHooks",
+			"services": [
+				"WikiPageFactory",
+				"TitleFactory",
+				"TimeTracker:EntryWikitext"
+			]
+		},
+		"permissions": {
+			"class": "MediaWiki\\Extension\\TimeTracker\\Hooks\\PermissionHooks"
+		},
+		"delete": {
+			"class": "MediaWiki\\Extension\\TimeTracker\\Hooks\\DeleteHooks",
+			"services": [
+				"TimeTracker:Query"
+			]
+		},
+		"sidebar": {
+			"class": "MediaWiki\\Extension\\TimeTracker\\Hooks\\SidebarHooks",
+			"services": [
+				"TitleFactory"
+			]
+		},
+		"save": {
+			"class": "MediaWiki\\Extension\\TimeTracker\\Hooks\\SaveHooks"
+		}
+	},
+	"ResourceModules": {
+		"ext.timetracker.base": {
+			"styles": [
+				"ext.timetracker.base.css"
+			]
+		},
+		"ext.timetracker.dashboard": {
+			"styles": [
+				"ext.timetracker.dashboard.css"
+			]
+		},
+		"ext.timetracker.timer": {
+			"scripts": [
+				"ext.timetracker.timer.js"
+			],
+			"styles": [
+				"ext.timetracker.timer.css"
+			],
+			"messages": [
+				"timetracker-timer-elapsed",
+				"timetracker-saved-added"
+			],
+			"dependencies": [
+				"jquery",
+				"mediawiki.api",
+				"mediawiki.notification"
+			]
+		},
+		"ext.timetracker.reports": {
+			"scripts": [
+				"ext.timetracker.reports.js"
+			],
+			"styles": [
+				"ext.timetracker.reports.css"
+			],
+			"dependencies": [
+				"jquery"
+			]
+		},
+		"ext.timetracker.refresh": {
+			"scripts": [
+				"ext.timetracker.refresh.js"
+			]
+		},
+		"ext.timetracker.grid": {
+			"scripts": [
+				"ext.timetracker.grid.js"
+			],
+			"styles": [
+				"ext.timetracker.grid.css"
+			],
+			"messages": [
+				"timetracker-task-general",
+				"timereports-col-customer",
+				"timereports-col-job",
+				"timereports-col-task"
+			],
+			"dependencies": [
+				"jquery",
+				"mediawiki.api",
+				"mediawiki.notification",
+				"mediawiki.util"
+			]
+		}
+	},
+	"ResourceFileModulePaths": {
+		"localBasePath": "resources",
+		"remoteExtPath": "TimeTracker/resources"
+	},
+	"manifest_version": 2
+}

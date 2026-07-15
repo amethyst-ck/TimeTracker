@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="bootstrap.php"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/9.3/phpunit.xsd"
+	colors="true"
+	convertDeprecationsToExceptions="true"
+	convertErrorsToExceptions="true"
+	convertNoticesToExceptions="true"
+	convertWarningsToExceptions="true"
+	beStrictAboutTestsThatDoNotTestAnything="true"
+	verbose="false">
+	<!--
+		Unit suite only: every test extends MediaWikiUnitTestCase and runs via
+		this extension-local bootstrap. TimeTracker has no database schema, so
+		there is no integration suite. See .github/workflows/ci.yml for the
+		exact phpunit invocation.
+	-->
+	<testsuites>
+		<testsuite name="unit">
+			<directory>unit</directory>
+		</testsuite>
+	</testsuites>
+</phpunit>

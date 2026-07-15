@@ -1,0 +1,98 @@
+/* Launcher-tile grid for the dashboard and {{#timetracker_tile:}}. */
+
+/* Inline "New …" action button (customer/job pages): a compact button with
+   the icon on the same line as the label. */
+.tt-newbtn {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.45em;
+	padding: 0.5em 1em;
+	border: 1px solid var( --tt-border, #dbe0e3 );
+	border-radius: var( --tt-radius-sm, 7px );
+	background: #fff;
+	box-shadow: 0 1px 2px rgba( 0, 0, 0, 0.1 ), 0 2px 8px rgba( 0, 0, 0, 0.1 );
+	font-weight: 600;
+	color: inherit;
+	text-decoration: none;
+	white-space: nowrap;
+}
+
+.tt-newbtn:hover {
+	border-color: var( --tt-accent, #14866d );
+	color: var( --tt-accent, #14866d );
+	box-shadow: 0 2px 4px rgba( 0, 0, 0, 0.12 ), 0 4px 12px rgba( 20, 134, 109, 0.15 );
+	text-decoration: none;
+}
+
+.tt-newbtn-icon {
+	font-size: 1.1em;
+	line-height: 1;
+}
+
+.tt-dash-grid {
+	display: grid;
+	grid-template-columns: repeat( 3, 1fr );
+	gap: 1em;
+	margin: 1em 0;
+	max-width: 60em;
+}
+
+/* A blank cell holds a grid slot (to centre the lone Browse tile in row 3);
+   once the grid reflows below 3 columns the tiles pack and the blanks vanish. */
+.tt-dash-blank {
+	display: none;
+}
+
+@media ( min-width: 901px ) {
+	.tt-dash-blank {
+		display: block;
+	}
+}
+
+@media ( max-width: 900px ) {
+	.tt-dash-grid {
+		grid-template-columns: repeat( 2, 1fr );
+	}
+}
+
+@media ( max-width: 550px ) {
+	.tt-dash-grid {
+		grid-template-columns: 1fr;
+	}
+}
+
+.tt-dash-tile {
+	display: flex;
+	flex-direction: column;
+	gap: 0.3em;
+	padding: 1.15em 1.35em;
+	border: 1px solid var(--tt-border, #dbe0e3);
+	border-radius: var(--tt-radius, 10px);
+	background: #fff;
+	box-shadow: var( --tt-shadow, 0 1px 2px rgba( 0, 0, 0, 0.05 ), 0 2px 6px rgba( 0, 0, 0, 0.04 ) );
+	text-decoration: none;
+	color: inherit;
+	transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+
+.tt-dash-tile:hover {
+	border-color: var(--tt-accent, #14866d);
+	box-shadow: 0 6px 16px rgba( 20, 134, 109, 0.13 );
+	transform: translateY( -2px );
+	text-decoration: none;
+}
+
+.tt-dash-icon {
+	font-size: 1.9em;
+	line-height: 1;
+}
+
+.tt-dash-label {
+	font-weight: 700;
+	font-size: 1.05em;
+}
+
+.tt-dash-sub {
+	font-size: 0.85em;
+	color: var(--tt-muted, #54595d);
+}
