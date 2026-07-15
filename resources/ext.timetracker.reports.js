@@ -19,7 +19,13 @@
 			$form.find( '.tt-f-task' ).val( '' );
 			$form.trigger( 'submit' );
 		} );
-		$form.find( '.tt-f-task, .tt-f-user' ).on( 'change', function () {
+		$form.find( '.tt-f-task, .tt-f-user, .tt-f-from, .tt-f-to' ).on( 'change', function () {
+			$form.trigger( 'submit' );
+		} );
+		// Switching period starts fresh in that range — drop any week anchor so
+		// e.g. selecting "Week" lands on the current week.
+		$form.find( '.tt-f-period' ).on( 'change', function () {
+			$form.find( 'input[name=weekstart]' ).remove();
 			$form.trigger( 'submit' );
 		} );
 	} );

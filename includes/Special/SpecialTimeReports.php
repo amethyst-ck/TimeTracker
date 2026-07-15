@@ -14,14 +14,19 @@ use MediaWiki\SpecialPage\SpecialPage;
 use MediaWiki\Title\TitleFactory;
 
 /**
- * Special:TimeReports — the editable weekly timesheet grid. A filter bar
- * (customer, job, task, user) narrows the rows and the week is chosen with the
- * pager; state lives in GET params so a view is shareable and works without JS.
- * Ids are resolved to names in PHP from the customer/job/task maps.
+ * Special:TimeReports — a read-only totals report. A filter bar (customer, job,
+ * task, user) narrows the entries and a period (week, this/last month, this/last
+ * year, or a custom from–to range) sets the window; the result is one total per
+ * customer/job/task bucket plus a grand total, with CSV export. Time is entered
+ * and edited on the weekly grid on entity/user pages, not here. State lives in
+ * GET params so a view is shareable and works without JS.
  */
 class SpecialTimeReports extends SpecialPage {
 
 	use FormControls;
+
+	/** Selectable reporting periods. */
+	private const RANGES = [ 'week', 'this_month', 'last_month', 'this_year', 'last_year', 'custom' ];
 
 	public function __construct(
 		private readonly TimeTrackerQuery $query,
@@ -58,9 +63,11 @@ class SpecialTimeReports extends SpecialPage {
 			$userValue = $userParam;
 		}
 
-		$out->addModules( 'ext.timetracker.grid' );
-		// The editable weekly grid is the only view: a Mon–Sun matrix, pageable.
-		$period = $this->resolveWeek( $req );
+		$range = $req->getVal( 'range', 'week' );
+		if ( !in_array( $range, self::RANGES, true ) ) {
+			$range = 'week';
+		}
+		$period = $this->resolvePeriod( $range, $req );
 
 		// The job filter is scoped to the chosen customer: with no customer
 		// the dropdown offers only "All jobs". Archived jobs are hidden
@@ -92,14 +99,14 @@ class SpecialTimeReports extends SpecialPage {
 			return;
 		}
 
-		$out->addHTML( $this->renderFilterBar( $customer, $job, $userValue, $period, $jobs, $task ) );
-		$out->addHTML( $this->renderGrid( $rows, $names, $period, $userFilter, $customer, $job, $task ) );
+		$out->addHTML( $this->renderFilterBar( $customer, $job, $userValue, $range, $period, $jobs, $task ) );
+		$out->addHTML( $this->renderSummary( $rows, $names, $userFilter === null ) );
 	}
 
 	/**
 	 * Stream the filtered entries as a CSV download (Day, Customer, Job, Task,
 	 * User, Notes, Hours, Minutes). Duration is split into whole hours and
-	 * minutes rather than decimal hours. Uses the same rows as the timesheet.
+	 * minutes rather than decimal hours. Uses the same rows as the report.
 	 *
 	 * @param array<int,array<string,?string>> $rows
 	 * @param array{customers:array<string,string>,jobs:array<string,string>} $names
@@ -145,14 +152,40 @@ class SpecialTimeReports extends SpecialPage {
 	/* ---------------------------------------------------------------- period */
 
 	/**
-	 * Resolve the displayed Monday..Sunday week, honoring the week pager
-	 * (nav=prev/next) and the weekstart date picker.
+	 * Resolve the reporting window from the chosen range. Week honors the pager
+	 * (nav=prev/next) around a weekstart; the month/year presets are fixed
+	 * windows; custom reads from/to (swapped if reversed).
 	 *
 	 * @return array{from:string,to:string,label:string,weekstart:?string}
 	 */
-	private function resolveWeek( $req ): array {
+	private function resolvePeriod( string $range, $req ): array {
 		$tz = $this->timezone->safeZone();
 		$today = ( new DateTime( 'now', $tz ) )->setTime( 0, 0, 0 );
+
+		if ( $range === 'custom' ) {
+			$from = $this->parseDate( $req->getVal( 'from', '' ), $tz ) ?? ( clone $today );
+			$to = $this->parseDate( $req->getVal( 'to', '' ), $tz ) ?? ( clone $today );
+			if ( $to < $from ) {
+				[ $from, $to ] = [ $to, $from ];
+			}
+			return $this->window( $from, $to,
+				$from->format( 'M j, Y' ) . ' – ' . $to->format( 'M j, Y' ), null );
+		}
+
+		if ( $range === 'this_month' || $range === 'last_month' ) {
+			$anchor = ( clone $today )->modify( 'first day of' . ( $range === 'last_month' ? ' last month' : ' this month' ) );
+			$to = ( clone $anchor )->modify( 'last day of this month' );
+			return $this->window( $anchor, $to, $anchor->format( 'F Y' ), null );
+		}
+
+		if ( $range === 'this_year' || $range === 'last_year' ) {
+			$year = (int)$today->format( 'Y' ) - ( $range === 'last_year' ? 1 : 0 );
+			$from = ( new DateTime( "$year-01-01", $tz ) )->setTime( 0, 0, 0 );
+			$to = ( new DateTime( "$year-12-31", $tz ) )->setTime( 0, 0, 0 );
+			return $this->window( $from, $to, (string)$year, null );
+		}
+
+		// week (default): Monday..Sunday, pageable.
 		$weekstart = $this->parseDate( $req->getVal( 'weekstart', '' ), $tz )
 			?? ( clone $today );
 		$nav = $req->getVal( 'nav', '' );
@@ -192,7 +225,7 @@ class SpecialTimeReports extends SpecialPage {
 	/* --------------------------------------------------------------- filter */
 
 	private function renderFilterBar(
-		string $customer, string $job, string $userValue, array $period, array $jobs, string $task = ''
+		string $customer, string $job, string $userValue, string $range, array $period, array $jobs, string $task = ''
 	): string {
 		$form = [];
 		$form[] = $this->select( 'customer', $this->options(
@@ -224,11 +257,25 @@ class SpecialTimeReports extends SpecialPage {
 		$form[] = $this->field( 'timereports-filter-user',
 			Html::rawElement( 'select', [ 'name' => 'user', 'class' => 'tt-f-user' ], $userOpts ) );
 
-		// Preserve the resolved week so a filter change keeps the current week.
-		$hidden = '';
-		if ( $period['weekstart'] !== null ) {
-			$hidden = Html::hidden( 'weekstart', $period['weekstart'] );
+		// Period selector (auto-submits). Custom reveals from/to date inputs.
+		$rangeOpts = '';
+		foreach ( self::RANGES as $r ) {
+			$rangeOpts .= Html::element( 'option',
+				[ 'value' => $r ] + ( $r === $range ? [ 'selected' => '' ] : [] ),
+				$this->msg( 'timereports-range-' . $r )->text() );
 		}
+		$form[] = $this->field( 'timereports-filter-period',
+			Html::rawElement( 'select', [ 'name' => 'range', 'class' => 'tt-f-period' ], $rangeOpts ) );
+		if ( $range === 'custom' ) {
+			$form[] = $this->field( 'timereports-from', Html::element( 'input',
+				[ 'type' => 'date', 'name' => 'from', 'class' => 'tt-f-from', 'value' => $period['from'] ] ) );
+			$form[] = $this->field( 'timereports-to', Html::element( 'input',
+				[ 'type' => 'date', 'name' => 'to', 'class' => 'tt-f-to', 'value' => $period['to'] ] ) );
+		}
+
+		// Preserve the resolved week so a filter change keeps the current week.
+		$hidden = $range === 'week' && $period['weekstart'] !== null
+			? Html::hidden( 'weekstart', $period['weekstart'] ) : '';
 
 		// Section 1 — the filters. The selects auto-submit this form on change
 		// (see the JS); $hidden carries the current week along.
@@ -236,22 +283,27 @@ class SpecialTimeReports extends SpecialPage {
 			[ 'method' => 'get', 'action' => $this->getPageTitle()->getLocalURL(), 'class' => 'tt-filter' ],
 			implode( '', $form ) . $hidden );
 
-		// Section 2 — week navigation and CSV export.
-		$baseParams = $this->filterParams( $customer, $job, $userValue, $period, $task );
+		// Section 2 — the week pager (week range only) or the period label, and
+		// CSV export.
+		$baseParams = $this->filterParams( $customer, $job, $userValue, $range, $period, $task );
 		$csv = Html::element( 'a',
 			[ 'href' => $this->getPageTitle()->getLocalURL( [ 'format' => 'csv' ] + $baseParams ),
 				'class' => 'mw-ui-button' ],
 			$this->msg( 'timereports-export-csv' )->text() );
+		$left = $range === 'week'
+			? $this->weekPager( $period, $baseParams )
+			: Html::element( 'span', [ 'class' => 'tt-period-label' ], $period['label'] );
 		$controls = Html::rawElement( 'div', [ 'class' => 'tt-report-controls' ],
-			$this->weekPager( $period, $baseParams )
-			. Html::rawElement( 'span', [ 'class' => 'tt-controls-right' ], $csv ) );
+			$left . Html::rawElement( 'span', [ 'class' => 'tt-controls-right' ], $csv ) );
 
 		return $filterBar . $controls;
 	}
 
-	/** The current filter as query params — shared by the CSV link and the pager. */
-	private function filterParams( string $customer, string $job, string $userValue, array $period, string $task = '' ): array {
-		$params = [ 'user' => $userValue ];
+	/** The current filter + period as query params — shared by the CSV link and the pager. */
+	private function filterParams(
+		string $customer, string $job, string $userValue, string $range, array $period, string $task = ''
+	): array {
+		$params = [ 'user' => $userValue, 'range' => $range ];
 		if ( $customer !== '' ) {
 			$params['customer'] = $customer;
 		}
@@ -261,16 +313,19 @@ class SpecialTimeReports extends SpecialPage {
 		if ( $task !== '' ) {
 			$params['task'] = $task;
 		}
-		if ( $period['weekstart'] !== null ) {
+		if ( $range === 'week' && $period['weekstart'] !== null ) {
 			$params['weekstart'] = $period['weekstart'];
+		} elseif ( $range === 'custom' ) {
+			$params['from'] = $period['from'];
+			$params['to'] = $period['to'];
 		}
 		return $params;
 	}
 
 	/**
-	 * Prev / current-week / Next pager. Its own form (it sits in the controls
-	 * section, outside the filter form) that carries the applied filters as
-	 * hidden fields so stepping weeks keeps them.
+	 * Prev / current-week / Next pager for the week range. Its own form (it sits
+	 * in the controls section, outside the filter form) carrying the applied
+	 * filters + period as hidden fields so stepping weeks keeps them.
 	 */
 	private function weekPager( array $period, array $baseParams ): string {
 		$hidden = '';
@@ -282,14 +337,9 @@ class SpecialTimeReports extends SpecialPage {
 		$next = Html::element( 'button',
 			[ 'type' => 'submit', 'name' => 'nav', 'value' => 'next', 'class' => 'mw-ui-button tt-week-nav' ], '▶' );
 		$label = Html::element( 'span', [ 'class' => 'tt-week-label' ], $period['label'] );
-		// A date picker to jump to any week (handled by ext.timetracker.grid's JS,
-		// loaded on the grid view). It reloads with weekstart set to the chosen day.
-		$pick = Html::element( 'input', [ 'type' => 'date', 'class' => 'tt-g-weekpick tt-week-nav',
-			'value' => $period['from'], 'data-param' => 'weekstart',
-			'title' => $this->msg( 'timereports-pick-week' )->text() ] );
 		return Html::rawElement( 'form',
 			[ 'method' => 'get', 'action' => $this->getPageTitle()->getLocalURL(), 'class' => 'tt-week-pager' ],
-			$hidden . $prev . $label . $next . $pick );
+			$hidden . $prev . $label . $next );
 	}
 
 	/** Distinct users who have logged time, plus the viewer, sorted. @return string[] */
@@ -322,66 +372,76 @@ class SpecialTimeReports extends SpecialPage {
 			Html::element( 'span', [ 'class' => 'tt-f-label' ], $this->msg( $labelMsg )->text() ) . $control );
 	}
 
-	/* ----------------------------------------------------------------- grid */
+	/* -------------------------------------------------------------- summary */
 
 	/**
-	 * Weekly timesheet matrix: one row per customer/job/task (plus user when
-	 * viewing everyone), a column per weekday, cells = hours logged that day.
-	 * Each cell is inline-editable and auto-saves via the setcell API.
+	 * Read-only totals for the period: one row per customer/job/task bucket (plus
+	 * user when viewing everyone) with its summed hours, ordered by name, and a
+	 * grand total. Names resolve from the id maps; the general (task-less) bucket
+	 * shows a dash.
 	 *
 	 * @param array<int,array<string,?string>> $rows
 	 * @param array{customers:array<string,string>,jobs:array<string,string>,tasks:array<string,string>} $names
-	 * @param array{from:string,to:string,label:string,weekstart:?string} $period from = the week's Monday
-	 * @param bool $allUsers whether the user filter spans everyone (adds a User column + row key)
+	 * @param bool $allUsers add a User column and key rows by user too
 	 */
-	private function renderGrid(
-		array $rows, array $names, array $period, ?string $gridUser,
-		string $customer, string $job, string $task
-	): string {
-		$canAdd = $gridUser !== null && $this->canEdit( (string)$gridUser );
-		// Scope the add-row to the active filter so it can't offer (and then
-		// overwrite) a bucket that exists but is hidden by the filter. Filters
-		// are hierarchical (task ⇒ job ⇒ customer), so they compose into fixed
-		// add-row dimensions just like an entity page's grid.
-		$fixed = [];
-		if ( $customer !== '' ) {
-			$fixed['customer'] = [ $customer, $names['customers'][$customer] ?? $customer ];
+	private function renderSummary( array $rows, array $names, bool $allUsers ): string {
+		$buckets = [];
+		foreach ( $rows as $r ) {
+			$c = (string)$r['customer'];
+			$j = (string)$r['job'];
+			$t = (string)$r['task'];
+			$u = (string)$r['user'];
+			$key = $c . '|' . $j . '|' . $t . ( $allUsers ? '|' . $u : '' );
+			$buckets[$key] ??= [ 'customer' => $c, 'job' => $j, 'task' => $t, 'user' => $u, 'hours' => 0.0 ];
+			$buckets[$key]['hours'] += (float)$r['duration'];
 		}
-		if ( $job !== '' ) {
-			$fixed['job'] = [ $job, $names['jobs'][$job] ?? $job ];
+		if ( !$buckets ) {
+			return $this->table->empty( $this->msg( 'timereports-none' )->text() );
 		}
-		if ( $task !== '' ) {
-			$fixed['task'] = [ $task, $names['tasks'][$task] ?? $task ];
-		}
-		return $this->table->renderGrid(
-			$rows, $names, $this->weekDays( $period['from'] ),
-			$this->getUser()->getName(),
-			$this->getUser()->isAllowed( 'timetracker-editothers' ),
-			$gridUser,
-			$canAdd ? $this->query->customerJobsMap() : [],
-			$fixed );
-	}
 
-	/** The seven Mon..Sun days of the week starting at $mondayYmd. @return array<int,array{ymd:string,label:string}> */
-	private function weekDays( string $mondayYmd ): array {
-		$out = [];
-		try {
-			$d = new DateTime( $mondayYmd );
-		} catch ( \Exception $e ) {
-			return $out;
-		}
-		for ( $i = 0; $i < 7; $i++ ) {
-			$out[] = [ 'ymd' => $d->format( 'Y-m-d' ), 'label' => $d->format( 'D j' ) ];
-			$d->modify( '+1 day' );
-		}
-		return $out;
-	}
+		$cn = static fn ( array $b ): string => $names['customers'][$b['customer']] ?? $b['customer'];
+		$jn = static fn ( array $b ): string => $names['jobs'][$b['job']] ?? $b['job'];
+		$tn = static fn ( array $b ): string => $b['task'] === '' ? '' : ( $names['tasks'][$b['task']] ?? $b['task'] );
+		usort( $buckets, static fn ( $a, $b ) => strnatcasecmp( $cn( $a ), $cn( $b ) )
+			?: strnatcasecmp( $jn( $a ), $jn( $b ) )
+			?: strnatcasecmp( $tn( $a ), $tn( $b ) )
+			?: ( $allUsers ? strnatcasecmp( $a['user'], $b['user'] ) : 0 ) );
 
+		$th = fn ( string $key, string $class = '' ): string => Html::element(
+			'th', $class !== '' ? [ 'class' => $class ] : [], $this->msg( $key )->text() );
+		$head = $th( 'timereports-col-customer' ) . $th( 'timereports-col-job' ) . $th( 'timereports-col-task' )
+			. ( $allUsers ? $th( 'timereports-col-user' ) : '' ) . $th( 'timereports-col-hours', 'tt-num' );
 
-	/** Whether the viewer may edit $rowUser's time (their own, or an admin). */
-	private function canEdit( string $rowUser ): bool {
-		return $rowUser === $this->getUser()->getName()
-			|| $this->getUser()->isAllowed( 'timetracker-editothers' );
+		$body = '';
+		$grand = 0.0;
+		foreach ( $buckets as $b ) {
+			$grand += $b['hours'];
+			$cells = Html::rawElement( 'td', [ 'data-label' => $this->msg( 'timereports-col-customer' )->text() ],
+					$this->table->pageLink( $b['customer'], $cn( $b ) ) )
+				. Html::rawElement( 'td', [ 'data-label' => $this->msg( 'timereports-col-job' )->text() ],
+					$this->table->pageLink( $b['job'], $jn( $b ) ) )
+				. Html::rawElement( 'td', [ 'data-label' => $this->msg( 'timereports-col-task' )->text() ],
+					$this->table->taskLabel( $b['task'], $tn( $b ) ) );
+			if ( $allUsers ) {
+				$cells .= Html::rawElement( 'td', [ 'data-label' => $this->msg( 'timereports-col-user' )->text() ],
+					$this->table->pageLink( 'User:' . $b['user'], $b['user'] ) );
+			}
+			$cells .= Html::element( 'td',
+				[ 'class' => 'tt-num', 'data-label' => $this->msg( 'timereports-col-hours' )->text() ],
+				Duration::hm( $b['hours'] ) );
+			$body .= Html::rawElement( 'tr', [], $cells );
+		}
+
+		$foot = Html::rawElement( 'tr', [ 'class' => 'tt-ts-total' ],
+			Html::element( 'th', [ 'colspan' => $allUsers ? 4 : 3 ], $this->msg( 'timereports-total' )->text() )
+			. Html::element( 'th', [ 'class' => 'tt-num' ], Duration::hm( $grand ) ) );
+
+		// Reuse the timesheet's styled look (.tt-ts-wrap / .tt-timesheet).
+		return Html::rawElement( 'div', [ 'class' => 'tt-ts-wrap' ],
+			Html::rawElement( 'table', [ 'class' => 'tt-timesheet tt-summary' ],
+				Html::rawElement( 'thead', [], Html::rawElement( 'tr', [], $head ) )
+				. Html::rawElement( 'tbody', [], $body )
+				. Html::rawElement( 'tfoot', [], $foot ) ) );
 	}
 
 	/** @inheritDoc */
